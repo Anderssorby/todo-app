@@ -1,0 +1,9 @@
+# Virtual workspace root for the todo-app repository: no [mote] of its
+# own, just the list of motes it contains (mirrors ../monad's own
+# workspace-root mote.toml). Starts with just the backend; a future
+# todo-frontend (or other) mote would be added here.
+
+[workspace]
+members = [
+  "todo-backend",
+]

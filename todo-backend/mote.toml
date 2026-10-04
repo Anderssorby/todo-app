@@ -1,0 +1,23 @@
+[mote]
+name = "todo-backend"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+path = "src/lib.mo"
+
+[bin]
+name = "todo-backend"
+path = "src/main.mo"
+
+[dependencies.std]
+path = "../../monad/std"
+
+[dependencies.lang]
+path = "../../monad/lang"
+
+[dependencies.moon]
+path = "../../monad/motes/moon"
+
+[dependencies.http]
+path = "../../monad/motes/http"

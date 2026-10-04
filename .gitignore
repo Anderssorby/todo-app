@@ -1,0 +1,12 @@
+# Monad build output
+/target
+/target-monad
+
+# devenv / direnv
+.devenv*
+.direnv
+devenv.local.nix
+devenv.local.yaml
+
+# Runtime state (file-backed persistence, see src/persist.mo)
+todos.json
