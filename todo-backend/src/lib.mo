@@ -1,7 +1,8 @@
-// The todo-app mote's library root -- lets main.mo (and other files in
-// this mote) reach storage.mo/html.mo/handlers.mo via `use lib::<name>`.
+// The backend mote's library root. The Todo domain, actions, codec, and
+// view now live in todo-core; only the IO/persistence and HTTP layers are
+// backend-specific.
 
-pub use lib::storage {*}
-pub use lib::html {*}
 pub use lib::persist {*}
+pub use lib::form {*}
 pub use lib::handlers {*}
+pub use lib::logging {*}
