@@ -10,3 +10,11 @@ devenv.local.yaml
 
 # Runtime state (file-backed persistence, see src/persist.mo)
 todos.json
+
+# Build artifact for the wasm shell (see PLAN.md M9/M10)
+/web/app.wasm
+
+# LLVM IR / object files emitted next to the wasm build output
+/web/app.wasm.ll
+/web/app.wasm.o
+/web/app.wasm_runtime.o

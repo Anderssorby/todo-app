@@ -13,11 +13,29 @@ path = "src/main.mo"
 [dependencies.std]
 path = "../../monad/std"
 
-[dependencies.lang]
-path = "../../monad/lang"
+# `json` replaced `lang::json` when JSON was extracted out of the compiler
+# into its own mote (2026-10-19). The compiler's `lang` mote is no longer a
+# dependency of this app.
+[dependencies.json]
+path = "../../monad/motes/json"
+
+# The shared pure core: Todo/Storage, Action, the JSON codec, and the oak
+# view. The backend keeps only the HTTP and file-I/O layers.
+[dependencies.todo_core]
+path = "../todo-core"
 
 [dependencies.moon]
 path = "../../monad/motes/moon"
 
 [dependencies.http]
 path = "../../monad/motes/http"
+
+[dependencies.log]
+path = "../../monad/motes/log"
+
+# The CLI arg parser: --port/-p and the auto-generated --help/-h.
+[dependencies.clap]
+path = "../../monad/motes/clap"
+
+[affine]
+mode = "warn"

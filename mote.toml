@@ -5,5 +5,8 @@
 
 [workspace]
 members = [
+  "todo-core",
   "todo-backend",
+  "todo-spa",
+  "todo-webgen",
 ]

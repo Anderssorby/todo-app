@@ -1,0 +1,40 @@
+# A build-time generator for the browser loader entry.
+#
+# It reads the vendored loader (`web/web.js`, `web/web_runtime.js`,
+# `web/float_format.js`) and the built `web/app.wasm`, then emits:
+#
+#   web/web_runtime.gen.js  -- web_runtime.js with its float_format import
+#                              pinned to that file's SHA-256
+#   web/web.gen.js          -- web.js with its web_runtime import pinned to
+#                              the generated runtime copy's SHA-256
+#   web/boot.js             -- the loader entry, rendered with `jsgen`, with
+#                              every import/fetch URL pinned to its file hash
+#   web/boot.version        -- the SHA-256 of boot.js, read by the backend's
+#                              SSR shell for /web/boot.js?v=<hash>
+#
+# Run it from the repository root after building web/app.wasm, before
+# building/starting the backend. `web/boot_url.test.mjs` re-checks every
+# hash against the files.
+#
+# This is an app-side consumer of `jsgen` (the same emitter `web_wasm` uses
+# for the ABI loader); the vendored loader files themselves stay verbatim.
+[mote]
+name = "todo-webgen"
+version = "0.1.0"
+edition = "2026"
+
+[bin]
+name = "todo-webgen"
+path = "src/main.mo"
+
+[dependencies.init]
+path = "../../monad/init"
+
+[dependencies.std]
+path = "../../monad/std"
+
+[dependencies.jsgen]
+path = "../../monad/motes/jsgen"
+
+[affine]
+mode = "warn"

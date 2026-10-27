@@ -1,0 +1,60 @@
+# The browser SPA: a real oak_wasm Program (mount/dispatch/tick,
+# diff/patch over the DOM) instead of the one-shot `todo-frontend` kernel's
+# `app.innerHTML = result.html` swap. `targets = ["web"]` records that its
+# code is only meaningful there (it reaches web_wasm's DOM/fetch/storage/
+# console externs); availability is enforced per extern at codegen, same as
+# `web_wasm`/`oak_wasm` themselves, so `monad check` still runs everywhere.
+[mote]
+name = "todo_spa"
+version = "0.1.0"
+edition = "2026"
+targets = ["web"]
+
+[bin]
+name = "todo-spa"
+path = "src/main.mo"
+
+[dependencies.init]
+path = "../../monad/init"
+
+[dependencies.std]
+path = "../../monad/std"
+
+[dependencies.todo_core]
+path = "../todo-core"
+
+[dependencies.oak]
+path = "../../monad/motes/oak"
+
+[dependencies.oak_wasm]
+path = "../../monad/motes/oak_wasm"
+
+[dependencies.web_wasm]
+path = "../../monad/motes/web_wasm"
+
+# The pure event snapshot the drop handler reads (`WebEvent.data`).
+[dependencies.web_event]
+path = "../../monad/motes/web_event"
+
+# The typed-event ABI's C half (`web_event_*`, `dom_add_listener_global`)
+# lives in the checkout's runtime/src/platform_web.c; the installed nightly
+# predates it. The manifest tier is how an external mote points the link at
+# the checkout's runtime instead of the toolchain's copy.
+[dependencies.runtime]
+path = "../../monad/runtime"
+
+[dependencies.xml_html]
+path = "../../monad/motes/xml_html"
+
+[dependencies.json]
+path = "../../monad/motes/json"
+
+# NOT `log` (motes/log): `Logger.log`'s `json_lines` match arm calls
+# `Json.to_string`, which reaches the web-gated `F64.to_string` -- this
+# makes the whole mote unreachable-unsafe on `wasm32-unknown-unknown`
+# even when only `plain_text`/`Console.log` is used (filed as
+# `log-mote-not-web-safe`). `App.logger` below is a direct `Console.log`
+# stand-in until that's fixed upstream.
+
+[affine]
+mode = "warn"

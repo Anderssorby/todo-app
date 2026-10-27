@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>todo-app</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
+      ul.todos { list-style: none; padding: 0; }
+      ul.todos li { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
+      ul.todos li form { margin: 0; }
+      .toggle-form { display: flex; align-items: center; gap: 0.5rem; flex: 1; }
+      .title { flex: 1; text-align: left; background: none; border: none; font: inherit; padding: 0; cursor: pointer; }
+      li.done .title { text-decoration: line-through; opacity: 0.6; }
+    </style>
+  </head>
+  <body>
+    <main class="app-root"><div id="app"></div></main>
+    <script type="module">
+      // todo-webgen writes boot.version (the SHA-256 of boot.js); the same
+      // hash feeds the SSR shell's /web/boot.js?v=<hash>.
+      const version = (await (await fetch("./boot.version")).text()).trim();
+      await import(`./boot.js?v=${version}`);
+    </script>
+  </body>
+</html>

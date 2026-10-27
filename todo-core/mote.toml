@@ -1,0 +1,32 @@
+# The pure, wasm-portable core shared by the native backend and the wasm
+# frontend: the Todo domain, actions, the JSON codec, and the oak view.
+# No OS natives and no IO beyond what init/std provide everywhere.
+#
+# The mote name is `todo_core` (an underscore) because a `use` head must be
+# an identifier; the directory keeps the repo's hyphenated spelling like
+# `todo-backend`.
+[mote]
+name = "todo_core"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+path = "src/lib.mo"
+
+[dependencies.init]
+path = "../../monad/init"
+
+[dependencies.std]
+path = "../../monad/std"
+
+[dependencies.json]
+path = "../../monad/motes/json"
+
+[dependencies.oak]
+path = "../../monad/motes/oak"
+
+[dependencies.xml_html]
+path = "../../monad/motes/xml_html"
+
+[affine]
+mode = "warn"
