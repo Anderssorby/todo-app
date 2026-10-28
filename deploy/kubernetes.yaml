@@ -49,8 +49,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: todo-app
-          image: ghcr.io/anderssorby/todo-app:latest
-          imagePullPolicy: Always
+          # Imported into the node's containerd with `k3s ctr images import`;
+          # there is no registry in this cluster.
+          image: todo-app:latest
+          imagePullPolicy: IfNotPresent
           args: ["--port", "8095"]
           ports:
             - name: http
@@ -111,11 +113,14 @@ metadata:
   name: todo-app
   namespace: todo
 spec:
-  type: ClusterIP
+  # No ingress controller in this cluster (traefik and servicelb are disabled),
+  # so host nginx proxies to this NodePort over loopback.
+  type: NodePort
   selector:
     app.kubernetes.io/name: todo-app
   ports:
     - name: http
       port: 80
       targetPort: http
+      nodePort: 30080
       protocol: TCP
