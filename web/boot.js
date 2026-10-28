@@ -3,6 +3,6 @@ import { imports } from "./web.gen.js?v=a5e6df69f5e54112e098c2051f9951c151946614
 import { host } from "./web_runtime.gen.js?v=374d47f1343c3dfe0dc8bd34bb33286a6b9189dc1e0d4eee5d66f773a97523ce";
 
 export { imports, host };
-let APP_WASM_URL = "/web/app.wasm?v=06b6cc57659532988175515ef19ab3996a30132fa65924134285ac40cbd7971f";
+let APP_WASM_URL = "/web/app.wasm?v=d2a70dbf3bd69fcc76ae2c8fdc5c697835ba9ea2b5724a97c0bb245584f8c5d8";
 let mount = async (url, selector) => { host.set_root(selector); const response = await fetch(url); if (!response.ok) { throw new Error('todo-spa: ' + url + ' -> HTTP ' + response.status); } const bytes = await response.arrayBuffer(); const { instance } = await WebAssembly.instantiate(bytes, imports); host.bind(instance); if (instance.exports.oak_mount) instance.exports.oak_mount(); host.start_ticks(instance); return instance; };
 if (typeof document !== 'undefined') { (async () => { try { await mount(APP_WASM_URL, '#app'); } catch (error) { console.error('todo-spa: failed to mount', error); } })(); };

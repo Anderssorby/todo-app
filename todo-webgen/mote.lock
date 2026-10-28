@@ -1,0 +1,32 @@
+# mote.lock -- written by `monad fetch` / `monad update`. Do not edit by hand.
+version = 1
+
+[[mote]]
+name = "init"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=init#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "init"
+checksum = "sha256:3464bc27cb075b401210671c43027fe5d1227c6f290bfc5aaf29bc20c68807bd"
+
+[[mote]]
+name = "jsgen"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/jsgen#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/jsgen"
+checksum = "sha256:baebfefac58ea528af67bd2cfb10bc0f41d8568487cb741da9ad80ee558bc423"
+
+[[mote]]
+name = "std"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=std#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "std"
+checksum = "sha256:ff31d2cf5dc5c25e3bd002f0f66d1a051ad25987e31d25ab4ebd5f05fbdd8e7f"

@@ -240,6 +240,12 @@ pattern. A mote reached from another mote needs an identifier-safe name
 standalone repo, not folded into `monad/motes/`; `moon`/`http`/`json`/
 `oak`/`xml_html` are cross-repo path deps:
 
+> **Superseded 2026-10-27.** These sibling `../../monad` path dependencies
+> are now git dependencies pinned to
+> `https://github.com/monad-lang/monad.git` at `12b74e92`; see
+> [Dependency migration and packaging](#dependency-migration-and-packaging-2026-10-27).
+> The snippets below record the original layout.
+
 ```toml
 # todo-core/mote.toml -- pure, wasm-portable shared core
 [mote]
@@ -709,11 +715,12 @@ consumer but keeps its own `#[test]`s.
     typed handlers with synthetic events, and covers SPA
     add/edit/subtask-add and kanban DnD.
   - Toolchain note: the installed nightly (`e8af85e2`) predates the event
-    ABI, so `todo-spa/mote.toml` declares
-    `[dependencies.runtime] path = "../../monad/runtime"` — the compiler's
-    manifest tier then links the checkout's `runtime/src/platform_web.c`
-    (which includes the new `web_event_*`/`dom_*_global` wrappers). Without
-    it the wasm link fails on those undefined symbols.
+    ABI, so `todo-spa/mote.toml` declares a `runtime` dependency (now pinned
+    to the same Monad git revision `12b74e92` as the other motes) — the
+    compiler's manifest tier then links that
+    `runtime/src/platform_web.c` (which includes the new
+    `web_event_*`/`dom_*_global` wrappers). Without it the wasm link fails on
+    those undefined symbols.
   Verified: `monad check --workspace` 0 errors; `monad test todo-core/src`
   57/57; `monad test todo-backend/src` 8/8; `monad test todo-webgen/src`
   6/6; the SPA wasm builds, `todo-webgen` writes the hash-pinned loader, and
@@ -797,6 +804,37 @@ consumer but keeps its own `#[test]`s.
   web/runtime_args.test.mjs` pins the unsigned-word recovery. The upstream
   `web_str_ptr` sign-extension is a runtime bug worth reporting; the loader
   fix is the local guard.
+
+## Dependency migration and packaging (2026-10-27)
+
+The app now consumes the Monad motes as git dependencies pinned to
+`https://github.com/monad-lang/monad.git` at
+`12b74e927bed6e149b9f2668f62bbf5e856d031c`, replacing every sibling
+`../../monad` path dependency. The root workspace is virtual (no `[mote]`), so
+there is no root lock: `todo-core`, `todo-backend`, `todo-spa` and
+`todo-webgen` each carry a committed `mote.lock` (5/9/9/3 entries).
+`scripts/fetch-deps.sh` is the one-time network step (`monad fetch` per
+member, then an offline pass); every build/check/test uses `--locked` and
+never fetches. The loader ABI is unchanged between the vendored loader's
+commit `953102e2` and `12b74e92`, so `web/web.js`,
+`web/web_runtime.js` and `web/float_format.js` are untouched (including the
+local `word32`/idle-tick changes in `web_runtime.js`).
+
+`flake.nix` takes the compiler and the source tree from the Monad flake input
+pinned to the same revision (`12b74e92`), with the flake's nixpkgs following
+the Monad input's pin so the compiler's cached derivation and the image use
+one llvm/clang/glibc closure. It declares the Monad CI Cachix substituter, so
+`nix build --accept-flake-config .#image` reuses the prebuilt compiler; the
+git-checkout cache is seeded from the input's source tree, `MONAD_ROOT`
+points at it for the ambient toolchain sources, and the same `--locked` build
+steps produce the backend, SPA and hash-pinned loader. `dockerTools` then
+assembles the non-root `linux/amd64` image (glibc only, `/bin/sh` + coreutils,
+entrypoint). The image runs with `WORKDIR=/app`, bakes
+`/app/todos.json -> /state/todos.json`, and seeds state in memory when the
+file is absent. `deploy/kubernetes.yaml` targets one replica with `Recreate`
+and a ReadWriteOnce PVC at `/state`; the backend's in-place, unlocked file
+writes are not safe for multiple writers. See `deploy/README.md` for the
+probes, persistence semantics, and deployment caveats.
 
 ## Gap-Logging Workflow (continuous, not deferred)
 
@@ -908,10 +946,10 @@ annotation (see Context).
 - From M19: `POST /api/actions` with `{"type":"add"|…}` bodies (add, edit,
   add_subtask, set_status, toggle) plus malformed-JSON/invalid-action 400s,
   and the no-JS multipart `POST /todos -F title=…`, against a live server.
-  The SPA wasm must link `../../monad/runtime` (the manifest-tier pin in
-  `todo-spa/mote.toml`); if the link reports undefined
-  `web_event_*`/`web_dom_*_global`, the runtime C resolution fell back to
-  the stale installed nightly.
+  The SPA wasm must link the git-pinned `runtime` mote (rev `12b74e92`; the
+  manifest-tier dependency in `todo-spa/mote.toml`); if the link reports
+  undefined `web_event_*`/`web_dom_*_global`, the runtime C resolution fell
+  back to the stale installed nightly.
 - Boot path: `node web/boot_url.test.mjs`; on the live server
   `GET /web/app.wasm` must be 200 `application/wasm` and `GET /app.wasm` 404
   (the document-relative path that used to make `instantiateStreaming`

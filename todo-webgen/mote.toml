@@ -28,13 +28,19 @@ name = "todo-webgen"
 path = "src/main.mo"
 
 [dependencies.init]
-path = "../../monad/init"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "init"
 
 [dependencies.std]
-path = "../../monad/std"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "std"
 
 [dependencies.jsgen]
-path = "../../monad/motes/jsgen"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "motes/jsgen"
 
 [affine]
 mode = "warn"
