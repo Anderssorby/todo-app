@@ -11,6 +11,7 @@ use lib::codec {
 }
 use std::map {BTreeMap}
 use std::list {List.filter, List.filter_map, List.length}
+use std::parse {Parse.i64}
 
 pub type Action {
   add (title : String),
@@ -200,38 +201,16 @@ pub def Action.to_json (a : Action) : String :=
 // backend's `http::strings`/`Form.parse_tags` are native-only, and the SPA
 // cannot depend on `http`.
 
-/// One ASCII digit as an `I64`, or none. (There is no `U8 -> I64`
-/// conversion wired in the compiled backends.)
-def Action.digit_value (b : U8) : Option I64 :=
-  if U8.beq b 48u8 then Option.some 0i64
-  else if U8.beq b 49u8 then Option.some 1i64
-  else if U8.beq b 50u8 then Option.some 2i64
-  else if U8.beq b 51u8 then Option.some 3i64
-  else if U8.beq b 52u8 then Option.some 4i64
-  else if U8.beq b 53u8 then Option.some 5i64
-  else if U8.beq b 54u8 then Option.some 6i64
-  else if U8.beq b 55u8 then Option.some 7i64
-  else if U8.beq b 56u8 then Option.some 8i64
-  else if U8.beq b 57u8 then Option.some 9i64
-  else Option.none
-
-#[terminating]
-def Action.parse_id_go (bytes : List U8) (acc : I64) : Option I64 :=
-  match bytes {
-    List.empty => Option.some acc,
-    List.cons b rest =>
-      match Action.digit_value b {
-        Option.some d => Action.parse_id_go rest (I64.add (I64.mul acc 10i64) d),
-        Option.none => Option.none,
-      },
-  }
-
 /// A todo id as carried by the kanban drag payload (`text/plain`).
+///
+/// `Parse.i64` rejects overflow instead of wrapping (I64 arithmetic wraps
+/// silently), so dragging arbitrary text such as "18446744073709551617"
+/// cannot alias an existing id. Ids are non-negative, so a sign is
+/// rejected too.
 pub def Action.parse_id (raw : String) : Option I64 :=
-  let bytes := String.to_list (String.trim raw) in
-  match bytes {
-    List.empty => Option.none,
-    List.cons _ _ => Action.parse_id_go bytes 0i64,
+  match Parse.i64 (String.trim raw) {
+    Option.some n => if I64.lt n 0i64 then Option.none else Option.some n,
+    Option.none => Option.none,
   }
 
 #[terminating]
@@ -417,6 +396,13 @@ def test_parse_id_rejects_non_digits : Bool :=
 #[test]
 def test_parse_id_rejects_empty : Bool :=
   match Action.parse_id "   " {
+    Option.some _ => false,
+    Option.none => true,
+  }
+
+#[test]
+def test_parse_id_rejects_overflow : Bool :=
+  match Action.parse_id "18446744073709551617" {
     Option.some _ => false,
     Option.none => true,
   }

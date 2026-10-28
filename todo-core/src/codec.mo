@@ -13,6 +13,19 @@ use json::json {Json}
 use std::list {List.filter, List.filter_map, List.intercalate, List.length}
 use std::map {BTreeMap}
 
+/// One hex digit (0-15) as a character.
+def Codec.hex_digit_char (n : U8) : U8 :=
+  if U8.lt n 10u8 then U8.add n 48u8 else U8.add n 87u8
+
+/// A raw control byte as `\u00XX`. JSON forbids unescaped characters below
+/// 0x20, so a control byte in a title/notes (or a crafted request body)
+/// would otherwise produce a file and API responses that standards-
+/// compliant parsers reject.
+def Codec.control_escape (b : U8) : String :=
+  let hi : U8 := U8.div b 16u8 in
+  let lo : U8 := U8.sub b (U8.mul hi 16u8) in
+  String.concat "\\u00" (String.from_list [Codec.hex_digit_char hi, Codec.hex_digit_char lo])
+
 /// Escape one byte for a JSON string literal. Walking bytes (through
 /// `String.to_list`) keeps multi-byte UTF-8 intact without needing
 /// `parsec`'s width probe.
@@ -24,6 +37,7 @@ pub def Codec.escape_char (b : U8) : String :=
   else if U8.beq b 10u8 then "\\n"
   else if U8.beq b 13u8 then "\\r"
   else if U8.beq b 9u8 then "\\t"
+  else if U8.lt b 32u8 then Codec.control_escape b
   else String.from_list (List.cons b List.empty)
 
 pub def Codec.escape_json_string (s : String) : String :=
@@ -201,6 +215,11 @@ pub def Codec.todos_from_json (text : String) : Option (List Todo) :=
 #[test]
 def test_escape_quotes_and_backslash : Bool :=
   String.beq (Codec.json_string "a\"b\\c") "\"a\\\"b\\\\c\""
+
+#[test]
+def test_escape_control_bytes : Bool :=
+  String.beq (Codec.escape_json_string (String.from_list [97u8, 1u8, 27u8, 98u8]))
+    "a\\u0001\\u001bb"
 
 #[test]
 def test_utf8_titles_round_trip : Bool :=
