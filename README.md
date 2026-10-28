@@ -105,8 +105,12 @@ frame message, so an always-on frame subscription grew memory continuously
 (~12 MB/s idle) until strings above 2 GiB hit the loader's sign-extended
 pointers and threw `RangeError: invalid or out-of-range index`. The loader
 now reads pointer/length words as unsigned and logs (rather than throws) if
-one is genuinely outside memory. The no-JS fallback still works: the
-server-rendered forms post to the ordinary `/todos/...` routes.
+one is genuinely outside memory. Responses are drained in 64 KiB reads (the
+loader's scratch-buffer cap), so a list larger than that is parsed in full; a
+failed fetch renders a banner with a Retry control, and a group/tag filter
+whose last todo is deleted is dropped instead of hiding the rest of the
+list. The no-JS fallback still works: the server-rendered (urlencoded) forms
+post to the ordinary `/todos/...` routes.
 
 The SPA half is exercised automatically over a stub DOM:
 
