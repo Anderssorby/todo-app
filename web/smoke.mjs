@@ -209,12 +209,18 @@ function applyAction(action) {
   }
 }
 
+let forcedStatus = 0;
 globalThis.fetch = async (url, options = {}) => {
   if (url === "/api/actions") {
     applyAction(JSON.parse(options.body || "{}"));
   }
   const text = JSON.stringify(serverTodos);
-  return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode(text).buffer };
+  const status = forcedStatus || 200;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    arrayBuffer: async () => new TextEncoder().encode(text).buffer,
+  };
 };
 
 // ── frame loop ─────────────────────────────────────────────────────────
@@ -562,5 +568,92 @@ await settle(instance, 10);
 if (todoList().length !== beforeDelete - 1) fail(`expected ${beforeDelete - 1} todos after delete, got ${todoList().length}`);
 if (serverTodos.length !== beforeDelete - 1) fail("delete did not sync to the stub server");
 console.log("ok: delete updated the DOM and synced to the server");
+
+// Large responses: `web_fetch_read` caps each call at its 64 KiB scratch
+// buffer, so the SPA must loop until a short read. One read truncated any
+// bigger body into invalid JSON, which surfaced as "unparseable response".
+// Force a >64 KiB authoritative response and check every item arrived.
+serverTodos = [];
+for (let i = 1; i <= 700; i++) {
+  serverTodos.push({
+    id: i,
+    title: `big ${i}`,
+    done: false,
+    notes: "x".repeat(200),
+    tags: [],
+    group: null,
+    subtasks: [],
+    status: "todo",
+  });
+}
+click(buttonByText("+ New"));
+await settle(instance, 2);
+const bigInput = byClass("add-form")[0].childNodes[0];
+typeInto(bigInput, "big add");
+await settle(instance, 2);
+const bigAddButton = walk(byClass("add-form")[0])
+  .find((b) => b.tagName === "BUTTON" && b.textContent === "Add");
+click(bigAddButton);
+await settle(instance, 20);
+if (serverTodos.length !== 701) fail(`expected 701 todos in the stub server, got ${serverTodos.length}`);
+const bigResponses = JSON.stringify(serverTodos).length;
+if (bigResponses <= 65536) fail(`the large-response test is not large enough (${bigResponses} bytes)`);
+if (todoList().length !== 701) {
+  fail(`a >64 KiB response was truncated: rendered ${todoList().length} of 701 todos`);
+}
+console.log(`ok: a ${bigResponses}-byte response is read in full (no 64 KiB truncation)`);
+
+// A failed response (here HTTP 500 from a failed save) must be visible and
+// recoverable: the frame pump stops after the failure, so without the
+// banner + Retry the page would never load again.
+forcedStatus = 500;
+click(buttonByText("big 1"));
+await settle(instance, 10);
+const banner = byClass("error-banner")[0];
+if (!banner) fail("the failure did not render an error banner");
+if (hasClass(banner, "hidden")) fail("the error banner stayed hidden after a 500");
+if (!walk(banner).some((n) => n.textContent.includes("HTTP 500"))) {
+  fail(`the error banner does not mention the HTTP status: ${banner.textContent}`);
+}
+const retryButton = walk(banner).find((b) => b.tagName === "BUTTON" && b.textContent === "Retry");
+if (!retryButton) fail("the error banner has no Retry button");
+console.log("ok: an HTTP 500 renders a visible banner with a Retry control");
+
+forcedStatus = 0;
+click(retryButton);
+await settle(instance, 20);
+const bannerAfter = byClass("error-banner")[0];
+if (!bannerAfter) fail("the error banner node disappeared after Retry");
+if (!hasClass(bannerAfter, "hidden")) {
+  fail(`Retry did not clear the error banner (text: ${bannerAfter.textContent})`);
+}
+if (todoList().length !== serverTodos.length) {
+  fail(`Retry did not reload the list (${todoList().length} of ${serverTodos.length} rendered)`);
+}
+console.log("ok: Retry reloads the list and clears the banner");
+
+// A group filter whose last member is deleted must be dropped: the chip
+// disappears with the group, so a stale filter would hide every remaining
+// todo with no visible way to clear it.
+serverTodos = [
+  { id: 1, title: "solo", done: false, notes: "", tags: [], group: "Solo", subtasks: [], status: "todo" },
+  { id: 2, title: "kept", done: false, notes: "", tags: [], group: null, subtasks: [], status: "todo" },
+];
+click(buttonByText("big 1")); // any mutation returns the new authoritative list
+await settle(instance, 10);
+if (todoList().length !== 2) fail(`expected the new 2-item list, got ${todoList().length}`);
+const soloChip = buttonByText("Solo");
+if (!soloChip) fail("the Solo group chip did not render");
+click(soloChip);
+await settle(instance, 2);
+if (todoList().length !== 1) fail(`the Solo filter did not hide the other todo (got ${todoList().length})`);
+click(deleteButtonFor(todoList()[0]));
+await settle(instance, 10);
+if (serverTodos.length !== 1) fail("deleting the only Solo todo did not reach the server");
+if (todoList().length !== 1) {
+  fail(`a stale group filter still hides the list after the group vanished (${todoList().length} visible)`);
+}
+if (buttonByText("Solo")) fail("the Solo chip is still rendered after its last todo was deleted");
+console.log("ok: a filter whose group disappears no longer hides the remaining todos");
 
 console.log(`ok: ${wasmPath} -> typed events, subscriptions, SPA controls and kanban drag-and-drop all round-tripped with no reload and no <form>`);
