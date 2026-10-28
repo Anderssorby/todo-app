@@ -1,0 +1,96 @@
+# Build the flake's OCI image and push it to GHCR.
+#
+# - main and v* tags: build and push. `latest` is published on the default
+#   branch (the Kubernetes manifest references ghcr.io/<owner>/<repo>:latest).
+# - pull requests: build only (no registry credentials), so the image still
+#   has to compile before merge.
+# - workflow_dispatch: build and push a ref/sha tag from the chosen branch.
+#
+# The GHCR package is private by default: either make it public or add an
+# imagePullSecrets entry to deploy/kubernetes.yaml. The manifest uses
+# imagePullPolicy: Always, so the pushed image (not a node-local one) is what
+# a cluster runs.
+name: image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Compute lowercase image name
+        id: image
+        # GHCR requires a lowercase repository name; github.repository keeps
+        # the owner's display case.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the OCI image
+        # --accept-flake-config applies the flake's Monad/devenv Cachix
+        # substituters so the self-hosted compiler is not rebuilt from source.
+        run: nix build --accept-flake-config .#image -L
+
+      - name: Load the image
+        run: docker load < result
+
+      - name: Docker metadata
+        id: meta
+        if: github.event_name != 'pull_request'
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the image
+        if: github.event_name != 'pull_request'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAGS" ]; then
+            echo "no image tags were generated" >&2
+            exit 1
+          fi
+          docker image inspect todo-app:latest >/dev/null
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "pushing $tag"
+            docker tag todo-app:latest "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"
