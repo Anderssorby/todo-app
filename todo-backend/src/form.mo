@@ -1,97 +1,43 @@
-/// The one piece `http` does not provide: extracting the multipart
-/// boundary from a Content-Type header and pulling the `title` field out
-/// of the parsed parts. A plain `application/x-www-form-urlencoded` post
-/// still has no decoder anywhere, so the no-JS form uses the multipart
-/// enctype.
-use http::body {Body.parse_multipart, Body.to_bytes_pure, MultipartPart}
+/// Form-field access for the no-JS routes.
+///
+/// The `http` mote decodes both form encodings: `Request.form_fields`
+/// (`Body.parse_form`) for `application/x-www-form-urlencoded`, which the
+/// server-rendered forms use, and `Request.multipart` for
+/// `multipart/form-data`, kept for clients still posting the old enctype.
+/// This module only names the fields the todo forms use; the earlier local
+/// boundary scanner duplicated the mote's parser and skipped its media-type
+/// and error handling.
+use http::body {MultipartPart}
+use http::request {Request.form_fields, Request.multipart, Request.param}
 use http::strings {Strings.split_on}
-use http::types {Headers, Headers.empty, Request}
-use std::list {List.filter, List.filter_map, List.length}
+use http::types {Body, Headers, Method, Request, Uri}
+use std::list {List.filter, List.length}
 
-def Form.starts_with_bytes (needle : List U8) (bytes : List U8) : Bool :=
-  match needle {
-    List.empty => true,
-    List.cons n rest_n => match bytes {
-      List.cons b rest_b => U8.beq n b && Form.starts_with_bytes rest_n rest_b,
-      List.empty => false,
+def Form.part_field (p : MultipartPart) : Pair String String :=
+  Pair.pair (MultipartPart.field_name p) (String.from_list (MultipartPart.bytes p))
+
+/// The request's form fields, whichever encoding it used.
+def Form.fields_of (req : Request) : Option (List (Pair String String)) :=
+  match Request.form_fields req {
+    Result.ok fields => Option.some fields,
+    Result.err _ => match Request.multipart req {
+      Result.ok parts => Option.some (List.map Form.part_field parts),
+      Result.err _ => Option.none,
     },
   }
 
-def Form.drop_prefix (needle : List U8) (bytes : List U8) : List U8 :=
-  match needle {
-    List.empty => bytes,
-    List.cons _ rest_n => match bytes {
-      List.cons _ rest_b => Form.drop_prefix rest_n rest_b,
-      List.empty => List.empty,
-    },
-  }
-
-def Form.take_until (stop : U8) (bytes : List U8) : List U8 :=
-  match bytes {
-    List.empty => List.empty,
-    List.cons b rest =>
-      if U8.beq b stop then List.empty else List.cons b (Form.take_until stop rest),
-  }
-
-/// A quoted boundary (`boundary="abc"`) ends at the closing quote; an
-/// unquoted one ends at `;` or end of header.
-def Form.boundary_value (bytes : List U8) : List U8 :=
-  match bytes {
-    List.empty => List.empty,
-    List.cons b rest =>
-      if U8.beq b 34u8 then Form.take_until 34u8 rest
-      else Form.take_until 59u8 bytes,
-  }
-
-#[terminating]
-def Form.find_boundary_go (marker : List U8) (bytes : List U8) : Option String :=
-  match bytes {
-    List.empty => Option.none,
-    List.cons _ rest =>
-      if Form.starts_with_bytes marker bytes
-      then Option.some (String.from_list (Form.boundary_value (Form.drop_prefix marker bytes)))
-      else Form.find_boundary_go marker rest,
-  }
-
-pub def Form.boundary_of (content_type : String) : Option String :=
-  Form.find_boundary_go (String.to_list "boundary=") (String.to_list content_type)
-
-def Form.field (name : String) (part : MultipartPart) : Option String :=
-  match part {
-    MultipartPart.part part_name _filename _headers data =>
-      if String.beq part_name name then Option.some (String.from_list data) else Option.none
-  }
-
-/// The parsed multipart parts of a request, or none when it isn't
-/// multipart (the JSON path handles that).
-pub def Form.parts_of (req : Request) : Option (List MultipartPart) :=
-  match Headers.get "content-type" req.headers {
-    Option.some ct =>
-      if String.starts_with "multipart/form-data" ct then
-        match Form.boundary_of ct {
-          Option.some boundary => match Body.parse_multipart boundary (Body.to_bytes_pure req.body) {
-            ok parts => Option.some parts,
-            err _ => Option.none,
-          },
-          Option.none => Option.none,
-        }
-      else Option.none,
-    Option.none => Option.none,
-  }
-
-/// The first value of a named multipart field, or none if absent / the
-/// request isn't multipart.
+/// The first value of a named field, or none if absent / not a form body.
 pub def Form.value_of (name : String) (req : Request) : Option String :=
-  match Form.parts_of req {
-    Option.some parts => List.first (List.filter_map (Form.field name) parts),
+  match Form.fields_of req {
+    Option.some fields => Request.param name fields,
     Option.none => Option.none,
   }
 
 pub def Form.value_or_empty (name : String) (req : Request) : String :=
   Option.get_or_default "" (Form.value_of name req)
 
-/// The `title` of a multipart create post, or none when the request is not
-/// multipart (the JSON path handles that).
+/// The `title` of a form create post, or none when the request is not a
+/// form (the JSON path handles that).
 pub def Form.title_of (req : Request) : Option String := Form.value_of "title" req
 
 /// `tags` is a single comma-separated field (not N repeated inputs --
@@ -111,31 +57,24 @@ def Form.parse_group (raw : String) : Option String :=
 pub def Form.group_of (req : Request) : Option String := Form.parse_group (Form.value_or_empty "group" req)
 
 #[test]
-def test_boundary_unquoted : Bool :=
-  match Form.boundary_of "multipart/form-data; boundary=abc123" {
-    Option.some b => String.beq b "abc123",
+def test_title_of_reads_urlencoded_field : Bool :=
+  let hs := Headers.set "Content-Type" "application/x-www-form-urlencoded" Headers.empty in
+  let base := Request.get (Uri.uri "" Option.none "" Option.none "/todos/new" Option.none Option.none) in
+  let req : Request := { base with method := Method.POST, headers := hs, body := Body.text "title=hello+world" } in
+  match Form.title_of req {
+    Option.some v => String.beq v "hello world",
     Option.none => false,
   }
 
 #[test]
-def test_boundary_quoted : Bool :=
-  match Form.boundary_of "multipart/form-data; boundary=\"a b c\"; charset=utf-8" {
-    Option.some b => String.beq b "a b c",
-    Option.none => false,
-  }
-
-#[test]
-def test_boundary_missing : Bool :=
-  match Form.boundary_of "multipart/form-data" {
-    Option.some _ => false,
-    Option.none => true,
-  }
-
-#[test]
-def test_value_of_reads_named_field : Bool :=
-  let part := MultipartPart.part "notes" Option.none Headers.empty (String.to_list "hello") in
-  match Form.field "notes" part {
-    Option.some v => String.beq v "hello",
+def test_title_of_reads_multipart_field : Bool :=
+  let raw := "--BOUND\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhi\r\n--BOUND--\r\n" in
+  let hs := Headers.set "Content-Type" "multipart/form-data; boundary=BOUND" Headers.empty in
+  let base := Request.get (Uri.uri "" Option.none "" Option.none "/todos" Option.none Option.none) in
+  let req : Request :=
+    { base with method := Method.POST, headers := hs, body := Body.bytes (String.to_list raw) } in
+  match Form.title_of req {
+    Option.some v => String.beq v "hi",
     Option.none => false,
   }
 
