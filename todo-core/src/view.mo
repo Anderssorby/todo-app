@@ -84,6 +84,9 @@ pub def View.css : String :=
     ".edit-form{margin-top:.5rem;border-top:1px solid var(--border);padding-top:.5rem;display:flex;flex-direction:column;gap:.4rem}",
     ".edit-form input,.edit-form textarea{padding:.4rem;border:1px solid var(--border);border-radius:.4rem;background:var(--surface);color:var(--fg);font:inherit}",
     ".edit-form button{align-self:flex-start;background:var(--accent);color:var(--accent-fg);border:none;border-radius:.4rem;padding:.4rem 1rem;cursor:pointer}",
+    ".error-banner{display:flex;justify-content:space-between;align-items:center;gap:.75rem;padding:.6rem .8rem;margin-bottom:1rem;border:1px solid #fca5a5;border-radius:.4rem;background:#fef2f2;color:#991b1b;font-size:.875rem}",
+    ".error-banner.hidden{display:none}",
+    ".error-banner button{border:1px solid currentColor;border-radius:.4rem;padding:.25rem .8rem;background:none;color:inherit;cursor:pointer}",
     ".app-footer{display:flex;justify-content:space-between;align-items:center;margin-top:1rem;color:var(--muted);font-size:.875rem}",
     ".app-footer button{background:none;border:1px solid var(--border);border-radius:.4rem;padding:.3rem .8rem;color:var(--fg);cursor:pointer}",
     ".settings-tab .setting-row{display:flex;justify-content:space-between;align-items:center;padding:.75rem 0;border-bottom:1px solid var(--border)}",
@@ -193,7 +196,7 @@ pub def View.subtask_add_form (t : Todo) : Oak.Node Unit :=
   Html.form
     [ Html.attr "method" "post",
       Html.attr "action" (View.todo_path t "subtasks"),
-      Html.attr "enctype" "multipart/form-data",
+      Html.attr "enctype" "application/x-www-form-urlencoded",
       Html.class_ ["subtask-add-form"] ]
     [ Html.input [Html.name_ "title", Html.placeholder "Add a subtask", Html.required, Html.type_ "text"],
       Html.button [Html.type_ "submit"] [Html.text "+"] ]
@@ -215,7 +218,7 @@ pub def View.edit_form (t : Todo) : Oak.Node Unit :=
   Html.form
     [ Html.attr "method" "post",
       Html.attr "action" (View.todo_path t "edit"),
-      Html.attr "enctype" "multipart/form-data",
+      Html.attr "enctype" "application/x-www-form-urlencoded",
       Html.class_ ["edit-form"] ]
     [ Html.input [Html.name_ "title", Html.value_ t.title, Html.required, Html.type_ "text", Html.placeholder "Title"],
       Html.textarea [Html.name_ "notes", Html.placeholder "Notes"] [Html.text t.notes],
@@ -234,14 +237,14 @@ pub def View.item (t : Todo) : Oak.Node Unit :=
       View.notes_preview t,
       View.subtasks_block t ]
 
-/// The no-JS create form. The backend parses this as multipart; without
+/// The no-JS create form. The backend parses this as urlencoded; without
 /// JavaScript the submit is a real navigation. The SPA renders its own
 /// controlled form (posting `/api/actions`) and never uses this one.
 pub def View.add_form : Oak.Node Unit :=
   Html.form
     [ Html.attr "method" "post",
       Html.attr "action" "/todos",
-      Html.attr "enctype" "multipart/form-data",
+      Html.attr "enctype" "application/x-www-form-urlencoded",
       Html.class_ ["add-form"] ]
     [ Html.input [Html.name_ "title", Html.placeholder "New todo", Html.required, Html.type_ "text"],
       Html.button [Html.type_ "submit"] [Html.text "Add"] ]

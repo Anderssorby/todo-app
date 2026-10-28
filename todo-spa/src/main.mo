@@ -36,12 +36,13 @@ use oak::app {Command, Host, Program}
 use oak_wasm::program {Runtime.dispatch, Runtime.mount, Runtime.tick}
 use web_event::event {HandlerResult, ListenerFlags, WebEvent}
 use web_wasm::dom {Dom.append, Dom.create, Dom.query, Dom.set_text}
-use web_wasm::fetch {Fetch.begin, Fetch.poll, Fetch.read}
+use web_wasm::fetch {Fetch.begin, Fetch.poll, Fetch.read, Fetch.status}
 use web_wasm::storage {Storage.get, Storage.set}
 use web_wasm::console {Console.log}
 use web_wasm::types {RequestId}
 use std::list {
-  List.contains_by, List.filter, List.filter_map, List.intercalate, List.length, List.sort_by
+  List.any, List.contains_by, List.filter, List.filter_map, List.intercalate, List.length,
+  List.sort_by
 }
 use xml_html::html {Html.Node}
 
@@ -76,7 +77,11 @@ struct Model {
   subtask_generation : I64,
   pending_form : Option PendingForm,
   drag_id : Option I64,
-  drag_over : Option Status
+  drag_over : Option Status,
+  /// The last fetch failure, shown with a retry control. `Spa.subs` stops
+  /// the frame pump once `loaded` is set, so without this a failed initial
+  /// load would leave an empty page with no way to try again.
+  error : Option String
 }
 
 def Model.empty : Model :=
@@ -85,7 +90,8 @@ def Model.empty : Model :=
     filter_group := Option.none, filter_tag := Option.none,
     new_title := "", edit_title := "", edit_notes := "", edit_group := "",
     edit_tags := "", subtask_drafts := List.empty, subtask_generation := 0i64,
-    pending_form := Option.none, drag_id := Option.none, drag_over := Option.none }
+    pending_form := Option.none, drag_id := Option.none, drag_over := Option.none,
+    error := Option.none }
 
 type Msg {
   toggle (id : I64),
@@ -124,7 +130,8 @@ type Msg {
   poll,
   began (rid : RequestId),
   loaded (todos : List Todo),
-  failed (reason : String)
+  failed (reason : String),
+  retry_load
 }
 
 type Effect {
@@ -292,6 +299,28 @@ def Spa.visible_todos (model : Model) : List Todo :=
     else model.todos in
   let by_group := List.filter (Spa.matches_group model.filter_group) by_done in
   List.filter (Spa.matches_tag model.filter_tag) by_group
+
+/// Drop a group/tag filter whose value no longer occurs anywhere in the
+/// list. The chips are rendered from the current distinct values, so a
+/// filter left over from the last todo of that group/tag would otherwise
+/// have no chip to clear and would hide every remaining todo until a
+/// reload.
+pub def Spa.prune_filters (model : Model) : Model :=
+  let group := match model.filter_group {
+    Option.some g =>
+      if List.any
+        (fn (t : Todo) => match t.group { Option.some tg => String.beq tg g, Option.none => false })
+        model.todos
+      then Option.some g else Option.none,
+    Option.none => Option.none,
+  } in
+  let tag := match model.filter_tag {
+    Option.some tag =>
+      if List.any (fn (t : Todo) => List.contains_by String.beq tag t.tags) model.todos
+      then Option.some tag else Option.none,
+    Option.none => Option.none,
+  } in
+  { model with filter_group := group, filter_tag := tag }
 
 // ── tag/group filter bar ─────────────────────────────────────────────
 
@@ -502,12 +531,26 @@ def Spa.kanban_view (model : Model) : Oak.Node Msg :=
       Spa.kanban_column model Status.doing "Doing" model.todos,
       Spa.kanban_column model Status.done "Done" model.todos ]
 
+/// A fetch failure is otherwise invisible: the frame pump stops once
+/// `loaded` is set, so a failed initial load would leave a blank page
+/// forever. Show the reason and a retry control.
+def Spa.error_banner (model : Model) : Oak.Node Msg :=
+  match model.error {
+    Option.none => Html.div [Html.class_ ["error-banner", "hidden"]] List.empty,
+    Option.some reason =>
+      Html.div [Html.class_ ["error-banner"]]
+        [ Html.span List.empty [Html.text (String.concat "Request failed: " reason)],
+          Html.button [Html.type_ "button", Spa.on_click Msg.retry_load]
+            [Html.text "Retry"] ],
+  }
+
 def Spa.view (model : Model) : Oak.Node Msg :=
   Html.div
     [ Html.class_ ["todo-app"],
       Html.attr "data-theme" (if model.dark_mode then "dark" else "light") ]
     [ Html.h1 List.empty [Html.text "todo-app"],
       Spa.nav model,
+      Spa.error_banner model,
       match model.page {
         Tab.tasks => Spa.tasks_view model,
         Tab.kanban => Spa.kanban_view model,
@@ -653,9 +696,10 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
           else Pair.pair { model with loaded := true } (Command.perform Effect.load),
       },
     Msg.began rid =>
-      Pair.pair { model with pending := Option.some rid } Command.none,
+      Pair.pair { model with pending := Option.some rid, error := Option.none } Command.none,
     Msg.loaded todos =>
-      let base := { model with todos := todos, pending := Option.none } in
+      let base := Spa.prune_filters
+        { model with todos := todos, pending := Option.none, error := Option.none } in
       match model.pending_form {
         Option.some form => match form {
           PendingForm.pending_add =>
@@ -674,8 +718,17 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
         Option.none =>
           Pair.pair base (Command.perform (Effect.cache todos)),
       },
-    Msg.failed _reason =>
-      Pair.pair { model with pending := Option.none, pending_form := Option.none } Command.none,
+    Msg.failed reason =>
+      // Keep `loaded` set so the frame pump stops; the banner's Retry
+      // control is what starts another load.
+      Pair.pair { model with pending := Option.none, pending_form := Option.none,
+        error := Option.some reason, loaded := true } Command.none,
+    Msg.retry_load =>
+      match model.pending {
+        Option.some _ => Pair.pair model Command.none,
+        Option.none =>
+          Pair.pair { model with error := Option.none } (Command.perform Effect.load),
+      },
   }
 
 // ── effects ──────────────────────────────────────────────────────────
@@ -686,19 +739,45 @@ def Spa.nth (xs : List String) (idx : I64) : Option String :=
     List.cons x rest => if idx == 0i64 then Option.some x else Spa.nth rest (idx - 1i64),
   }
 
+/// Drain the response body. `web_fetch_read` caps each call at its 64 KiB
+/// scratch buffer, and `Fetch.read` has no end-of-body signal beyond a
+/// short read, so read until a chunk is shorter than that. A single read
+/// truncated every response over 64 KiB (a few hundred todos) into invalid
+/// JSON, which the SPA reported as "unparseable response".
+#[partial]
+def Spa.read_all (rid : RequestId) (acc : String) : IO String := do {
+  let chunk <- Fetch.read rid 65536i64;
+  let next := String.concat acc chunk;
+  if I64.lt (String.length chunk) 65536i64
+  then return next
+  else Spa.read_all rid next
+}
+
 def Spa.resolve (rid : RequestId) : IO (Option Msg) := do {
   let state <- Fetch.poll rid;
   if state == 0i64
   then return Option.none
   else if state == 1i64
   then do {
-    let body <- Fetch.read rid 1000000i64;
-    match Codec.todos_from_json body {
-      Option.some todos => return (Option.some (Msg.loaded todos)),
-      Option.none => do {
-        let _ <- Console.log ("todo-spa WARN unparseable response: " ++ body);
-        return (Option.some (Msg.failed "unparseable response"))
-      },
+    // `fetch_poll` reports 1 for any HTTP response; check the status so a
+    // 500 from a failed save is reported as such instead of as bad JSON.
+    let status <- Fetch.status rid;
+    let ok := Bool.not (I64.lt status 200i64) && Bool.not (I64.gt status 299i64);
+    if Bool.not ok
+    then do {
+      let code := I64.to_string status;
+      let _ <- Console.log ("todo-spa WARN HTTP " ++ code);
+      return (Option.some (Msg.failed ("HTTP " ++ code)))
+    }
+    else do {
+      let body <- Spa.read_all rid "";
+      match Codec.todos_from_json body {
+        Option.some todos => return (Option.some (Msg.loaded todos)),
+        Option.none => do {
+          let _ <- Console.log ("todo-spa WARN unparseable response: " ++ body);
+          return (Option.some (Msg.failed "unparseable response"))
+        },
+      }
     }
   }
   else do {
