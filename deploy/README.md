@@ -74,6 +74,10 @@ the volume. The entrypoint fails fast if `/state` is missing or not writable
 
 - No file: the backend serves its built-in two-item seed in memory.
 - First mutation creates `/state/todos.json`.
+- A file that exists but cannot be read or parsed is a **500**, not a reset:
+  the backend refuses to overwrite it, so a torn read or a hand-broken file
+  cannot silently replace the list with the seed. Restore a backup, or
+  delete the file to start over from the seed.
 - Deleting the pod preserves state; deleting the PVC resets it.
 - The Deployment does not own or delete the PVC.
 
@@ -95,6 +99,28 @@ truncated file and fall back to the seed. Therefore:
 A production-grade multi-replica deployment needs a database and real
 transaction/locking semantics; that is a backend change, not a manifest
 change.
+
+Note that `replicas: 1` only rules out *cross-pod* writers. Inside the one
+pod `Server.serve_concurrent` still runs up to 16 handlers, and each mutation
+is a non-transactional `load -> apply -> save` of the whole file, so two
+mutations racing in one process can lose one update (last save wins; a read
+that lands mid-write now returns 500 instead of the seed). This is adequate
+for the single-user demo; serializing or moving state to a database is the
+fix if it matters.
+
+## Known SPA limits
+
+- The wasm shell has one request slot (`Model.pending`). Starting a second
+  mutation before the first response arrives leaves the first response
+  unread; the server still receives both, and the file store's last-write
+  wins. Clicking a few controls quickly is fine in practice, but a queue is
+  the real fix.
+- Deep links are server-side only: `/kanban`, `/todos/new` and
+  `/todos/:id/edit` render the no-JS page, then the SPA mounts on the Tasks
+  tab (the wasm runtime has no location API). The no-JS fallback works.
+- A failed fetch (network, HTTP 500, unparseable body) shows a banner with a
+  **Retry** control; the frame pump stops after a failure, so this is the
+  recovery path.
 
 ## Security / runtime
 
@@ -125,9 +151,10 @@ probes, not log output, as the health signal.
   StorageClass/fsGroup correctly.
 - **Probes failing / no response**: the app listens on IPv4 `0.0.0.0:8095`
   only; an IPv6-only cluster cannot reach it.
-- **State looks reset**: invalid or truncated JSON falls back to the seed
-  (`Persist.load`), and the next mutation then persists seed-derived data.
-  Restore the PVC backup.
+- **State looks reset**: a missing `todos.json` serves the seed and the first
+  mutation creates the file. A file that exists but does not parse is not
+  reset -- the server answers 500 ("todos.json is not valid JSON") and leaves
+  it alone. Restore the PVC backup, or delete the file to reset to the seed.
 
 ## Local container check
 
