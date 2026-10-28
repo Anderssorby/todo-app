@@ -1,0 +1,92 @@
+# mote.lock -- written by `monad fetch` / `monad update`. Do not edit by hand.
+version = 1
+
+[[mote]]
+name = "init"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=init#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "init"
+checksum = "sha256:3464bc27cb075b401210671c43027fe5d1227c6f290bfc5aaf29bc20c68807bd"
+
+[[mote]]
+name = "json"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/json#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/json"
+checksum = "sha256:11b70d157ca10b2d59e8d1e36a9ee2a2eef2e201ea44c06552fd7a472d74df19"
+
+[[mote]]
+name = "oak"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/oak#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/oak"
+checksum = "sha256:846a1d486dc9c16d078a6944c07b83ebd32673aee28ca300fc91ad66c7d5047d"
+
+[[mote]]
+name = "oak_wasm"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/oak_wasm#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/oak_wasm"
+checksum = "sha256:eff75a5c6cc1e3ce0a7b61ee1952514922ae8ad9d5d83b4694b6383694beaa6b"
+
+[[mote]]
+name = "runtime"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=runtime#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "runtime"
+checksum = "sha256:6de1732205dd922cd5656da60b2bf35d47981f558cda0c3d92dfe29e88347bf3"
+
+[[mote]]
+name = "std"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=std#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "std"
+checksum = "sha256:ff31d2cf5dc5c25e3bd002f0f66d1a051ad25987e31d25ab4ebd5f05fbdd8e7f"
+
+[[mote]]
+name = "web_event"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/web_event#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/web_event"
+checksum = "sha256:ddc198048ea786cc000bf42715e7609ee58ef71bcd366cb5dd69b708683988c5"
+
+[[mote]]
+name = "web_wasm"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/web_wasm#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/web_wasm"
+checksum = "sha256:29a5e7d406ad875bf314409fa8ee4ab923b16f14b39bf417b0c8b5b97fbf7bff"
+
+[[mote]]
+name = "xml_html"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/xml_html#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/xml_html"
+checksum = "sha256:f083f77fc3559e8d850e196b809a8c095c06cd732bd0e98d6e0f33b049186d75"

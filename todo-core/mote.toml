@@ -14,19 +14,29 @@ edition = "2026"
 path = "src/lib.mo"
 
 [dependencies.init]
-path = "../../monad/init"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "init"
 
 [dependencies.std]
-path = "../../monad/std"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "std"
 
 [dependencies.json]
-path = "../../monad/motes/json"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "motes/json"
 
 [dependencies.oak]
-path = "../../monad/motes/oak"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "motes/oak"
 
 [dependencies.xml_html]
-path = "../../monad/motes/xml_html"
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "motes/xml_html"
 
 [affine]
 mode = "warn"

@@ -29,6 +29,27 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
   (`web.js`, `web_runtime.js`, `float_format.js`), the generated loader
   entry and hashes (`boot.js`, `web.gen.js`, `web_runtime.gen.js`,
   `boot.version`), `smoke.mjs`, `app.wasm`.
+- `flake.nix`, `nix/` — the hermetic Nix build (pinned Monad toolchain and
+  git dependencies) and the OCI image.
+- `deploy/` — the container entrypoint, Kubernetes manifests, and deployment
+  notes.
+- `scripts/fetch-deps.sh` — the one-time network step that resolves the
+  pinned Monad git dependencies and writes each member's `mote.lock`.
+
+## Dependencies
+
+The Monad motes are pinned to the public
+`https://github.com/monad-lang/monad.git` repository at
+`12b74e927bed6e149b9f2668f62bbf5e856d031c` (see each `mote.toml`). The
+workspace root is virtual, so there is no root lock: `todo-core`,
+`todo-backend`, `todo-spa` and `todo-webgen` each carry their own committed
+`mote.lock`. After cloning or changing a manifest, run the only network step:
+
+```bash
+scripts/fetch-deps.sh
+```
+
+Every build, check and test then runs `--locked` and never uses the network.
 
 ## Build and run
 
@@ -39,13 +60,13 @@ Build the SPA and generate its hash-pinned loader first (the WASM block
 below), then the backend:
 
 ```bash
-monad check --workspace
-monad build todo-backend
+scripts/fetch-deps.sh
+monad check --workspace --locked
+monad build --locked todo-backend
 ./target/debug/todo-backend          # serves http://localhost:8095/
 ./target/debug/todo-backend --port 3000   # or -p 3000
 ./target/debug/todo-backend --help
-monad test todo-core/src
-monad test todo-backend/src
+monad test --workspace --locked
 ```
 
 WASM:
@@ -54,10 +75,10 @@ WASM:
 # todo-spa: the actual browser shell. Relative -o paths land under
 # the target directory when building a mote, so give the asset an
 # absolute path.
-monad build --target wasm32-unknown-unknown todo-spa -o "$PWD/web/app.wasm"
+monad build --locked --target wasm32-unknown-unknown todo-spa -o "$PWD/web/app.wasm"
 
 # Hash-pin the loader graph from the vendored sources + that wasm.
-monad build todo-webgen
+monad build --locked todo-webgen
 ./target/debug/todo-webgen
 
 node web/boot_url.test.mjs
@@ -126,3 +147,22 @@ fetches the same file. `node web/boot_url.test.mjs` recomputes every hash.
 Run `todo-webgen` after building the SPA wasm and before starting the
 backend; `start.sh` does both. This forces fresh URLs, so a browser's cached
 failed module cannot poison the page.
+
+## Container image
+
+`flake.nix` uses the pinned Monad flake (the compiler and the same revision as
+the mote git dependencies) and the Monad Cachix cache; `--accept-flake-config`
+lets Nix apply the flake's substituter settings. It builds the SPA, the
+hash-pinned loader and the backend, and assembles a non-root `linux/amd64`
+image. No sibling Monad checkout or local toolchain is needed for the build.
+
+```bash
+nix build --accept-flake-config .#image
+docker load < result
+docker run --rm -p 8095:8095 -v todo-state:/state todo-app:latest
+```
+
+The image runs the server with `WORKDIR=/app` and keeps state in the mounted
+`/state` volume via `/app/todos.json -> /state/todos.json`. See
+[`deploy/README.md`](deploy/README.md) for registry/kind loading, the
+Kubernetes manifests, probes, and the single-replica and file-state caveats.
