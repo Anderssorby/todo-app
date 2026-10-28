@@ -836,6 +836,50 @@ and a ReadWriteOnce PVC at `/state`; the backend's in-place, unlocked file
 writes are not safe for multiple writers. See `deploy/README.md` for the
 probes, persistence semantics, and deployment caveats.
 
+## Review hardening (2026-10-28)
+
+A review pass over the PR found and fixed:
+
+- `web_runtime.js` started its animation-frame loop twice (upstream starts it
+  once), so every frame dispatched the frame subscription twice and ran
+  `oak_tick` twice while a request was outstanding. Removed; the hash-pinned
+  loader was regenerated.
+- `Persist.save` errors were logged but the handler still returned 200, so a
+  client believed an unstored mutation had succeeded. `save` now reports the
+  failure and handlers answer 500 (JSON text for `/api/*`, plain text for the
+  no-JS routes).
+- `Persist.load` treated an unreadable or malformed file as "no data" and
+  returned the seed, so a read racing the in-place truncating write could be
+  persisted over the real list. It now returns an error; handlers answer 500
+  and leave the file untouched. A missing file still means the seed.
+- The SPA read the response once with `Fetch.read rid 1000000`, but
+  `web_fetch_read` caps every call at its 64 KiB scratch buffer, so any
+  response larger than that was truncated into invalid JSON. It now drains in
+  64 KiB chunks; `web/smoke.mjs` covers a 214 KB response.
+- `Msg.failed` left the frame pump stopped with no way back. A failed fetch
+  now renders a banner with a Retry control, and a non-2xx response is
+  reported as `HTTP <status>` instead of "unparseable response".
+- A group/tag filter whose last todo disappeared stayed active with no chip
+  to clear it, leaving the list permanently empty. Filters are pruned when
+  the authoritative list arrives.
+- `Action.parse_id` accumulated digits with unchecked `I64` arithmetic, so a
+  long drag payload could wrap onto an existing id. It uses `Parse.i64`,
+  which rejects overflow (and negatives).
+- `Codec.escape_char` passed control bytes below 0x20 (other than
+  \b\f\n\r\t) through, producing JSON that RFC 8259 parsers reject. They are
+  now `\u00XX`.
+- `form.mo` reimplemented the multipart boundary/field parser on the false
+  premise that the `http` mote had no form decoder. It now uses
+  `Request.form_fields`/`Request.multipart`, and the no-JS forms post
+  `application/x-www-form-urlencoded` (multipart is still accepted).
+
+Known limits (documented in `deploy/README.md`): a mutation is a
+non-transactional `load -> apply -> save`, so two mutations racing inside the
+one pod can lose an update; the SPA has a single pending-request slot, so a
+second mutation started before the first response leaves that response
+unread; and the wasm shell always mounts on the Tasks tab, so `/kanban` and
+the other SSR URLs are not deep links when JS is enabled.
+
 ## Gap-Logging Workflow (continuous, not deferred)
 
 After every `monad check`/`build`/`test`, wasm build/run, and curl check:
