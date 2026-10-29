@@ -19,7 +19,7 @@
     # The toolchain, the runtime sources and the git-dependency sources all
     # come from the Monad flake, pinned to the same revision as every
     # mote.toml.
-    monad.url = "github:monad-lang/monad/12b74e927bed6e149b9f2668f62bbf5e856d031c";
+    monad.url = "github:monad-lang/monad/a9d9a8115677546e41d89af923355b374817f897";
 
     # Follow the Monad flake's nixpkgs for the image build as well: the
     # compiler's cached derivation was built with that pin, and one nixpkgs
@@ -39,7 +39,7 @@
       # clang stays off PATH.
       wasiSdk = import ./nix/wasi-sdk.nix { inherit pkgs; };
 
-      monadRev = "12b74e927bed6e149b9f2668f62bbf5e856d031c";
+      monadRev = "a9d9a8115677546e41d89af923355b374817f897";
       monadUrl = "https://github.com/monad-lang/monad.git";
       # sha256 of the URL string above; the git cache layout is
       # $MONAD_HOME/cache/git/checkouts/<this>/<rev>. Verified against a

@@ -623,3 +623,136 @@ pub def Db.update_timezone (store : Store) (user_id : I64) (tz : String)
       "UPDATE users SET timezone = ?, updated_at = datetime('now') WHERE id = ?"
       [Value.text tz, Value.integer user_id]
       "timezone update failed")
+
+// ─── Tests ──────────────────────────────────────────────────────────────
+//
+// One real connection: migrate, write through the transactional path, then
+// read the rows back. This is deliberately an `IO` test -- a pure test
+// would leave the whole driver path (open, migrate, insert, join, decode)
+// unexercised, which is how a compiler/mote revision skew shipped a binary
+// that crashed inside `sqlite3_open_v2` while every check and test passed.
+
+def Db.test_actor : User := {
+  id := 1i64, issuer := "test", subject := "test", email := Option.none,
+  name := "Test User", picture := Option.none, timezone := "UTC",
+  created_at := "2026-01-01 00:00:00", updated_at := "2026-01-01 00:00:00"
+}
+
+// The actor's `users` row must exist before a todo names it as
+// `created_by`: the driver turns `PRAGMA foreign_keys` on.
+def Db.test_seed_actor (conn : SqliteConn) : IO (Result String Unit) := do {
+  let _ <- SqliteM.run
+    (Sqlite.exec
+      ("INSERT OR IGNORE INTO users (id, issuer, subject, name, timezone, " ++
+       "created_at, updated_at) VALUES (1, 'test', 'test', 'Test User', " ++
+       "'UTC', datetime('now'), datetime('now'))")
+      List.empty)
+    conn;
+  return (Result.ok Unit.unit)
+}
+
+def Db.test_workspace_empty (conn : SqliteConn) : IO (Result String Unit) := do {
+  let loaded <- SqliteM.run Db.load_m conn;
+  match loaded {
+    Result.err e => return (Result.err (SqlError.message e)),
+    Result.ok inner => match inner {
+      Result.err e => return (Result.err e),
+      Result.ok todos => match todos {
+        List.empty => return (Result.ok Unit.unit),
+        _ => return (Result.err "the workspace is not empty after migration"),
+      },
+    },
+  }
+}
+
+def Db.test_write_first (conn : SqliteConn) : IO (Result String Unit) := do {
+  let written <- SqliteM.run
+    (Db.load_apply_write_m Db.test_actor
+      (Action.add "first" "**md**" (Option.some "G") ["a", "b"]
+        (Option.some "2026-11-01")))
+    conn;
+  match written {
+    Result.err e => return (Result.err (SqlError.message e)),
+    Result.ok inner => match inner {
+      Result.err e => return (Result.err e),
+      Result.ok _ => return (Result.ok Unit.unit),
+    },
+  }
+}
+
+def Db.test_round_trip_ok (todos : List Todo) : Bool :=
+  match todos {
+    List.empty => false,
+    List.cons t _ =>
+      t.title == "first"
+      && t.notes == "**md**"
+      && (match t.group { Option.some g => g == "G", Option.none => false })
+      && (match t.due_at { Option.some d => d == "2026-11-01", Option.none => false })
+      && (match t.created_by { Option.some u => u.name == "Test User", Option.none => false })
+      && List.length t.tags == 2i64,
+  }
+
+def Db.test_check_loaded (r : Result SqlError (Result String (List Todo)))
+    : Result String Bool :=
+  match r {
+    Result.err e => Result.err (SqlError.message e),
+    Result.ok inner => match inner {
+      Result.err e => Result.err e,
+      Result.ok todos => Result.ok (Db.test_round_trip_ok todos),
+    },
+  }
+
+def Db.test_read_back (conn : SqliteConn) (r : Result String Unit)
+    : IO (Result String Bool) :=
+  match r {
+    Result.err e => return (Result.err e),
+    Result.ok _ => do {
+      let loaded <- SqliteM.run Db.load_m conn;
+      return (Db.test_check_loaded loaded);
+    },
+  }
+
+def Db.test_after_seed (conn : SqliteConn) (r : Result String Unit)
+    : IO (Result String Bool) :=
+  match r {
+    Result.err e => return (Result.err e),
+    Result.ok _ => do {
+      let wrote <- Db.test_write_first conn;
+      Db.test_read_back conn wrote;
+    },
+  }
+
+def Db.test_after_empty (conn : SqliteConn) (r : Result String Unit)
+    : IO (Result String Bool) :=
+  match r {
+    Result.err e => return (Result.err e),
+    Result.ok _ => do {
+      let seeded <- Db.test_seed_actor conn;
+      Db.test_after_seed conn seeded;
+    },
+  }
+
+def Db.test_after_migrate (conn : SqliteConn) (migrated : Result SqlError Unit)
+    : IO (Result String Bool) :=
+  match migrated {
+    Result.err e => return (Result.err ("migration failed: " ++ SqlError.message e)),
+    Result.ok _ => do {
+      let empty <- Db.test_workspace_empty conn;
+      Db.test_after_empty conn empty;
+    },
+  }
+
+#[test]
+def test_db_migrates_and_round_trips : IO Bool := do {
+  let result <- Db.with_conn ":memory:" (fn (conn : SqliteConn) => do {
+    let migrated <- Sqlite.migrate conn Db.migrations;
+    Db.test_after_migrate conn migrated;
+  });
+  match result {
+    Result.ok ok => return ok,
+    Result.err e => do {
+      let _ <- IO.write_stderr ("db test: " ++ e ++ "\n");
+      return false
+    },
+  }
+}
