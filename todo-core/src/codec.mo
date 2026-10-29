@@ -20,8 +20,12 @@ use lib::storage {
 use lib::user {User, UserRef}
 use json::json {Json}
 use json::serde_backend {derive_json_deserialize, derive_json_serialize}
-use std::list {List.filter, List.filter_map, List.intercalate, List.length}
-use std::map {BTreeMap, BTreeMap.to_list}
+use lib::json_text {
+  JsonText.escape_char, JsonText.escape_json_string, JsonText.group_to_json,
+  JsonText.json_string, JsonText.json_to_string, JsonText.option_string_to_json,
+  JsonText.status_to_json, JsonText.tags_to_json
+}
+use std::list {List.filter, List.filter_map, List.length}
 
 // ─── Derived wire structs ───────────────────────────────────────────────
 //
@@ -33,7 +37,7 @@ use std::map {BTreeMap, BTreeMap.to_list}
 // `id`/`title`/`done`-only document still decodes with empty notes/tags,
 // no group/subtasks/audit, and a status inferred from `done`.
 
-struct SubtaskDto {
+pub struct SubtaskDto {
   id : I64,
   title : String,
   done : Bool
@@ -42,7 +46,7 @@ struct SubtaskDto {
 derive_json_serialize! SubtaskDto
 derive_json_deserialize! SubtaskDto
 
-struct UserRefDto {
+pub struct UserRefDto {
   id : I64,
   name : String
 }
@@ -50,7 +54,7 @@ struct UserRefDto {
 derive_json_serialize! UserRefDto
 derive_json_deserialize! UserRefDto
 
-struct TodoDto {
+pub struct TodoDto {
   id : I64,
   title : String,
   done : Bool,
@@ -69,7 +73,7 @@ struct TodoDto {
 derive_json_serialize! TodoDto
 derive_json_deserialize! TodoDto
 
-struct UserDto {
+pub struct UserDto {
   id : I64,
   issuer : String := "",
   subject : String := "",
@@ -84,7 +88,7 @@ struct UserDto {
 derive_json_serialize! UserDto
 derive_json_deserialize! UserDto
 
-struct EnvelopeDto {
+pub struct EnvelopeDto {
   state : List TodoDto,
   html : String
 }
@@ -159,87 +163,32 @@ def Codec.user_from_dto (d : UserDto) : User :=
     created_at := d.created_at, updated_at := d.updated_at
   } in u
 
-// ─── Generic Json printer (web-safe) ────────────────────────────────────
+// ─── Text helpers (shared with the wasm-safe codec) ───────────────────
+//
+// The implementation lives in `json_text.mo`, which has no derive/macro
+// dependency. These wrappers keep the public `Codec.*` names the backend
+// and tests already use.
 
-/// One hex digit (0-15) as a character.
-def Codec.hex_digit_char (n : U8) : U8 :=
-  if U8.lt n 10u8 then U8.add n 48u8 else U8.add n 87u8
-
-/// A raw control byte as `\u00XX`. JSON forbids unescaped characters below
-/// 0x20, so a control byte in a title/notes (or a crafted request body)
-/// would otherwise produce a file and API responses that standards-
-/// compliant parsers reject.
-def Codec.control_escape (b : U8) : String :=
-  let hi : U8 := U8.div b 16u8 in
-  let lo : U8 := U8.sub b (U8.mul hi 16u8) in
-  String.concat "\\u00" (String.from_list [Codec.hex_digit_char hi, Codec.hex_digit_char lo])
-
-/// Escape one byte for a JSON string literal. Walking bytes (through
-/// `String.to_list`) keeps multi-byte UTF-8 intact without needing
-/// `parsec`'s width probe.
-pub def Codec.escape_char (b : U8) : String :=
-  if U8.beq b 34u8 then "\\\""
-  else if U8.beq b 92u8 then "\\\\"
-  else if U8.beq b 8u8 then "\\b"
-  else if U8.beq b 12u8 then "\\f"
-  else if U8.beq b 10u8 then "\\n"
-  else if U8.beq b 13u8 then "\\r"
-  else if U8.beq b 9u8 then "\\t"
-  else if U8.lt b 32u8 then Codec.control_escape b
-  else String.from_list (List.cons b List.empty)
+pub def Codec.escape_char (b : U8) : String := JsonText.escape_char b
 
 pub def Codec.escape_json_string (s : String) : String :=
-  String.concat_list (List.map Codec.escape_char (String.to_list s))
+  JsonText.escape_json_string s
 
-pub def Codec.json_string (s : String) : String :=
-  String.concat "\"" (String.concat (Codec.escape_json_string s) "\"")
+pub def Codec.json_string (s : String) : String := JsonText.json_string s
 
-def Codec.json_pair_to_string (p : Pair String Json) : String :=
-  match p {
-    Pair.pair k v =>
-      String.concat (Codec.json_string k)
-        (String.concat ":" (Codec.json_to_string v))
-  }
-
-/// A web-safe `Json -> String` printer. The parser only produces
-/// `Json.Number.int`; a manually constructed float is rendered as `null`
-/// rather than reaching the web-gated `F64.to_string`.
-pub def Codec.json_to_string (j : Json) : String :=
-  match j {
-    Json.null => "null",
-    Json.bool b => if b then "true" else "false",
-    Json.num n => match n {
-      Json.Number.int i => I64.to_string i,
-      Json.Number.float _ => "null",
-    },
-    Json.str s => Codec.json_string s,
-    Json.array xs =>
-      String.concat "["
-        (String.concat (List.intercalate "," (List.map Codec.json_to_string xs)) "]"),
-    Json.object o =>
-      String.concat "{"
-        (String.concat
-          (List.intercalate "," (List.map Codec.json_pair_to_string (BTreeMap.to_list o)))
-          "}"),
-  }
-
-// ─── Optional / small value encoders ────────────────────────────────────
+pub def Codec.json_to_string (j : Json) : String := JsonText.json_to_string j
 
 pub def Codec.option_string_to_json (o : Option String) : String :=
-  match o {
-    Option.some s => Codec.json_string s,
-    Option.none => "null",
-  }
+  JsonText.option_string_to_json o
 
 pub def Codec.group_to_json (group : Option String) : String :=
-  Codec.option_string_to_json group
+  JsonText.group_to_json group
 
 pub def Codec.status_to_json (s : Status) : String :=
-  Codec.json_string (Status.to_string s)
+  JsonText.status_to_json s
 
 pub def Codec.tags_to_json (tags : List String) : String :=
-  Codec.json_to_string
-    (Json.make_array (List.map (fn (t : String) => Json.make_str t) tags))
+  JsonText.tags_to_json tags
 
 // ─── Subtask / todo / envelope ──────────────────────────────────────────
 

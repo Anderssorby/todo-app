@@ -1,0 +1,102 @@
+# Check and build the app with the LATEST Monad nightly.
+#
+# The image workflow (image.yml) uses the flake's pinned toolchain. This one
+# deliberately uses `monadup default`, so it is the compatibility signal for
+# the next compiler revision: a parser/prelude/nightly regression shows up
+# here before the pin is bumped.
+name: nightly
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # After the Monad nightly cut; not on the hour to avoid the busiest slot.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install native toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            llvm clang lld libgc-dev pkg-config libsqlite3-dev \
+            zlib1g-dev libncurses-dev curl xz-utils nodejs
+          # The compiler invokes bare `llc`/`clang`/`ld.lld`; Ubuntu's
+          # versioned packages do not always provide those names.
+          if ! command -v llc >/dev/null 2>&1; then
+            llvm_bin="$(ls /usr/bin/llc-* 2>/dev/null | sort -V | tail -1)"
+            [ -n "$llvm_bin" ] || { echo "no llc found" >&2; exit 1; }
+            sudo ln -sf "$llvm_bin" /usr/local/bin/llc
+          fi
+          if ! command -v clang >/dev/null 2>&1; then
+            clang_bin="$(ls /usr/bin/clang-* 2>/dev/null | sort -V | tail -1)"
+            [ -n "$clang_bin" ] || { echo "no clang found" >&2; exit 1; }
+            sudo ln -sf "$clang_bin" /usr/local/bin/clang
+          fi
+          if ! command -v ld.lld >/dev/null 2>&1; then
+            lld_bin="$(ls /usr/bin/ld.lld-* 2>/dev/null | sort -V | tail -1)"
+            [ -n "$lld_bin" ] || { echo "no ld.lld found" >&2; exit 1; }
+            sudo ln -sf "$lld_bin" /usr/local/bin/ld.lld
+          fi
+          llc --version | head -1
+          clang --version | head -1
+
+      - name: Install wasi-sdk 34.0
+        run: |
+          url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz"
+          curl -fsSL "$url" -o /tmp/wasi-sdk.tar.gz
+          echo "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4  /tmp/wasi-sdk.tar.gz" \
+            | sha256sum -c -
+          mkdir -p "$HOME/wasi-sdk"
+          tar -xzf /tmp/wasi-sdk.tar.gz -C "$HOME/wasi-sdk" --strip-components=1
+          echo "WASI_SDK_PATH=$HOME/wasi-sdk" >> "$GITHUB_ENV"
+          "$HOME/wasi-sdk/bin/clang" --version | head -1
+
+      - name: Install the latest Monad nightly
+        run: |
+          curl -fsSL https://monad-lang.org/install | bash
+          export PATH="$HOME/.monad/bin:$PATH"
+          monadup default
+          echo "$HOME/.monad/bin" >> "$GITHUB_PATH"
+          monad version
+          monadup doctor
+
+      - name: Fetch pinned motes
+        run: |
+          # The one network step; the build/test steps then run --locked.
+          scripts/fetch-deps.sh
+
+      - name: Check and test
+        run: |
+          monad check --workspace --locked
+          monad test --workspace --locked
+
+      - name: Build
+        run: |
+          monad build --locked todo-backend
+          monad build --locked --target wasm32-unknown-unknown todo-spa -o "$PWD/web/app.wasm"
+          monad build --locked todo-webgen
+          ./target/debug/todo-webgen
+
+      - name: Loader and SPA tests
+        run: |
+          node web/boot_url.test.mjs
+          node web/runtime_args.test.mjs
+          node web/smoke.mjs "$PWD/web/app.wasm"

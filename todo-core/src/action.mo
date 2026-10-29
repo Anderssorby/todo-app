@@ -6,9 +6,9 @@ use lib::storage {
   Storage.toggle_subtask, Todo
 }
 use json::json {Json}
-use lib::codec {
-  Codec.group_to_json, Codec.json_string, Codec.option_string_to_json,
-  Codec.status_to_json, Codec.tags_to_json
+use lib::json_text {
+  JsonText.group_to_json, JsonText.json_string, JsonText.option_string_to_json,
+  JsonText.status_to_json, JsonText.tags_to_json
 }
 use std::map {BTreeMap}
 use std::list {List.filter, List.filter_map, List.length}
@@ -189,11 +189,11 @@ pub def Action.from_json (j : Json) : Option Action :=
 pub def Action.to_json (a : Action) : String :=
   match a {
     add title notes group tags due_at => String.concat_list [
-      "{\"type\":\"add\",\"title\":", Codec.json_string title,
-      ",\"notes\":", Codec.json_string notes,
-      ",\"group\":", Codec.group_to_json group,
-      ",\"tags\":", Codec.tags_to_json tags,
-      ",\"due_at\":", Codec.option_string_to_json due_at,
+      "{\"type\":\"add\",\"title\":", JsonText.json_string title,
+      ",\"notes\":", JsonText.json_string notes,
+      ",\"group\":", JsonText.group_to_json group,
+      ",\"tags\":", JsonText.tags_to_json tags,
+      ",\"due_at\":", JsonText.option_string_to_json due_at,
       "}"
     ],
     toggle id => String.concat_list [
@@ -204,16 +204,16 @@ pub def Action.to_json (a : Action) : String :=
     ],
     edit id title notes group tags due_at => String.concat_list [
       "{\"type\":\"edit\",\"id\":", I64.to_string id,
-      ",\"title\":", Codec.json_string title,
-      ",\"notes\":", Codec.json_string notes,
-      ",\"group\":", Codec.group_to_json group,
-      ",\"tags\":", Codec.tags_to_json tags,
-      ",\"due_at\":", Codec.option_string_to_json due_at,
+      ",\"title\":", JsonText.json_string title,
+      ",\"notes\":", JsonText.json_string notes,
+      ",\"group\":", JsonText.group_to_json group,
+      ",\"tags\":", JsonText.tags_to_json tags,
+      ",\"due_at\":", JsonText.option_string_to_json due_at,
       "}"
     ],
     add_subtask id title => String.concat_list [
       "{\"type\":\"add_subtask\",\"id\":", I64.to_string id,
-      ",\"title\":", Codec.json_string title, "}"
+      ",\"title\":", JsonText.json_string title, "}"
     ],
     toggle_subtask id => String.concat_list [
       "{\"type\":\"toggle_subtask\",\"id\":", I64.to_string id, "}"
@@ -224,7 +224,7 @@ pub def Action.to_json (a : Action) : String :=
     clear_completed => "{\"type\":\"clear_completed\"}",
     set_status id status => String.concat_list [
       "{\"type\":\"set_status\",\"id\":", I64.to_string id,
-      ",\"status\":", Codec.status_to_json status, "}"
+      ",\"status\":", JsonText.status_to_json status, "}"
     ],
     render => "{\"type\":\"render\"}",
   }
