@@ -82,6 +82,13 @@ jobs:
           monad version
           monadup doctor
 
+      # The compiler's runtime must match the pinned std/runtime: a mismatch
+      # links and then misbehaves at runtime (see the boot step at the bottom).
+      # Failing here means the latest nightly has moved past the pin -- bump
+      # every mote and the flake together, not just this job.
+      - name: Check the toolchain matches the pin
+        run: scripts/check-toolchain.sh
+
       - name: Fetch pinned motes
         run: |
           # The one network step; the build/test steps then run --locked.

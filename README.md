@@ -71,7 +71,9 @@ monadup use nightly-2026-10-28-a9d9a811
 ```
 
 The repo pins `a9d9a811` (the latest nightly), so `monadup default` on that
-nightly is consistent. Filed as
+nightly is consistent. `scripts/check-toolchain.sh` compares `monad version`
+with the pinned revision and fails with the matching `monadup use` command;
+the nightly workflow runs it before fetching or building. Filed as
 `compiler-mote-revision-skew-is-not-diagnosed` in [`PLAN.md`](PLAN.md); the
 checker should reject a compiler whose revision differs from the pinned
 `std`/`runtime`, and the `db::test_db_migrates_and_round_trips` test plus
