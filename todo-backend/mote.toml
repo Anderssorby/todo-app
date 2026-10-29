@@ -1,12 +1,11 @@
 # The native backend: moon HTTP server, SQLite persistence, users/sessions
 # and the SSR/oak pages.
 #
-# Workspace-dependency hybrid: `todo_core` is a PATH dep and is inherited
-# with `workspace = true` from the root. The compiler at the pinned
-# revision does not inherit GIT deps (they resolve to an empty lock and
-# `unresolved module`), so the Monad git sources stay explicit here; the
-# canonical copy also lives in the root `[workspace.dependencies]` for the
-# future full conversion.
+# Workspace-dependency note: the pinned compiler's `workspace = true`
+# inheritance does not load a dependency's submodules (`todo_core::storage`
+# is unresolved) and does not inherit git deps (they resolve to an empty
+# lock), so every source stays explicit here. The canonical copy lives in
+# the root `[workspace.dependencies]` for the future full conversion.
 #
 # The `sql`/`sqlite` driver is `#[extern "c"]`/compiled-backend-only, so it
 # is a backend dependency and never `todo-core` (which is also compiled for
@@ -34,7 +33,7 @@ rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
 subdir = "motes/json"
 
 [dependencies.todo_core]
-workspace = true
+path = "../todo-core"
 
 [dependencies.moon]
 git = "https://github.com/monad-lang/monad.git"

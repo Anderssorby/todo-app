@@ -72,6 +72,7 @@
           lld # wasm-ld
           clang
           pkg-config
+          sqlite # [link] pkg-config = ["sqlite3"]
           coreutils
           findutils
           bash
@@ -112,16 +113,17 @@
           runHook preInstall
           cd "$TMPDIR/app"
 
-          mkdir -p $out/app/bin $out/app/web
+          mkdir -p $out/app/bin $out/app/web $out/app/lib
           install -m755 target/release/todo-backend $out/app/bin/todo-backend
 
-          # The compiler's RUNPATH must not leak its llvm/clang/gc closure
-          # into the image: the backend only needs libc/libpthread, and Boehm
-          # GC is linked statically. Pin the interpreter and RPATH to the
-          # glibc this nixpkgs builds everything against.
+          # libsqlite3 is the one dynamic dependency outside glibc. Keep it
+          # beside the binary and resolve it through $ORIGIN, so the image
+          # closure stays app + glibc + sqlite and the compiler's
+          # llvm/clang/gc RUNPATH is not inherited.
+          cp -a ${pkgs.sqlite}/lib/libsqlite3.so* $out/app/lib/
           patchelf \
             --set-interpreter ${pkgs.stdenv.cc.libc}/lib/ld-linux-x86-64.so.2 \
-            --set-rpath ${pkgs.stdenv.cc.libc}/lib \
+            --set-rpath '$ORIGIN/../lib:${pkgs.stdenv.cc.libc}/lib' \
             $out/app/bin/todo-backend
 
           install -m644 \
@@ -131,10 +133,9 @@
 
           install -m755 deploy/entrypoint.sh $out/app/entrypoint.sh
 
-          # The backend reads "todos.json" relative to its cwd. Keep the
-          # image root read-only and put the state on the mounted /state
-          # volume (created in the image's extraCommands, or a PVC).
-          ln -s /state/todos.json $out/app/todos.json
+          # State is SQLite. The entrypoint passes --db /state/todos.db so
+          # the database and its WAL/SHM files live on the mounted /state
+          # volume; no symlink is installed under the read-only image root.
 
           runHook postInstall
         '';
