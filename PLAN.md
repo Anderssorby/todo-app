@@ -916,15 +916,17 @@ newer compiler, prints `opened ok` with the matching one). Diagnosis is
 a `gdb` backtrace plus `info registers` (`rsi = 0` at `openDatabase`'s
 `movq $0x0,(%rsi)`). Workaround: the toolchain must be the same revision
 as the motes (the flake pins it; a local `monadup default` may not), and
-the repo now pins `a9d9a811`. Regression cover added:
+the repo now pins `a9d9a811`, and `scripts/check-toolchain.sh` compares
+`monad version` with the pin before anything is fetched or built (the
+nightly workflow runs it). Regression cover added:
 `todo-backend/src/db.mo`'s `test_db_migrates_and_round_trips` opens a
 real connection and migrates in `monad test`, and the nightly workflow
-boots the built server, signs in through the dev stub, and posts an
-action. Upstream fix: the checker must compare the compiler's revision
-with the pinned `std`/`runtime` and reject the build with a clear
-diagnostic — a native-ABI mismatch must never reach codegen, and
-`monad test`/`monad build` must not emit a binary that crashes on the
-first `ByteBuf` use.
+boots the built server (production 401/302, then the dev stub, an empty
+workspace, an add and a reload). Upstream fix: the checker must compare
+the compiler's revision with the pinned `std`/`runtime` and reject the
+build with a clear diagnostic — a native-ABI mismatch must never reach
+codegen, and `monad test`/`monad build` must not emit a binary that
+crashes on the first `ByteBuf` use.
 The oak `HtmlT`/`Program` block is tracked under the existing
 `dict-capturing-closure-segfault` entry.
 **`moon-static-no-mime-or-binary` is resolved** (M13, upstream commits
