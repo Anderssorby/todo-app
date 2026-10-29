@@ -24,12 +24,12 @@ path = "src/main.mo"
 
 [dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "std"
 
 [dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/json"
 
 [dependencies.todo_core]
@@ -37,32 +37,32 @@ path = "../todo-core"
 
 [dependencies.moon]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/moon"
 
 [dependencies.http]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/http"
 
 [dependencies.log]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/log"
 
 [dependencies.clap]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/clap"
 
 [dependencies.sql]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/sql"
 
 [dependencies.sqlite]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/sqlite"
 
 [affine]

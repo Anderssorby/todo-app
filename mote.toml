@@ -25,83 +25,83 @@ members = [
 
 [workspace.dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "init"
 
 [workspace.dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "std"
 
 [workspace.dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/json"
 
 [workspace.dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/oak"
 
 [workspace.dependencies.xml_html]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/xml_html"
 
 [workspace.dependencies.moon]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/moon"
 
 [workspace.dependencies.http]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/http"
 
 [workspace.dependencies.log]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/log"
 
 [workspace.dependencies.clap]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/clap"
 
 [workspace.dependencies.sql]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/sql"
 
 [workspace.dependencies.sqlite]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/sqlite"
 
 [workspace.dependencies.jsgen]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/jsgen"
 
 [workspace.dependencies.oak_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/oak_wasm"
 
 [workspace.dependencies.web_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/web_wasm"
 
 [workspace.dependencies.web_event]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/web_event"
 
 # The typed-event ABI's C half, linked into the wasm build.
 [workspace.dependencies.runtime]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "runtime"
 
 # The intra-repo shared core (path relative to this workspace root).

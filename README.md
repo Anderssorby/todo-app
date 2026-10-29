@@ -10,9 +10,11 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
 - `todo-core/` — pure, wasm-portable domain: `Todo`, actions, the JSON
   codec, and the typed oak view (shared by the SSR page and the SPA; the
   server lowers it to HTML with `Oak.to_html`, which drops event bindings).
-- `todo-backend/` — native `moon` HTTP server with file-backed JSON state,
-  a `clap` CLI (`--port`/`-p`, `--help`), logging through the `log` mote,
-  and byte-exact static assets through moon's `Static.handler`.
+- `todo-backend/` — native `moon` HTTP server with SQLite state through the
+  `sql`/`sqlite` motes (`--db`/`-d`, default `todos.db`; migrations, users,
+  sessions and OAuth-state tables, transactional load → apply → rewrite), a
+  `clap` CLI (`--port`/`-p`, `--db`/`-d`, `--help`), logging through the
+  `log` mote, and byte-exact static assets through moon's `Static.handler`.
 - `todo-spa/` — the browser shell: a real typed-event `oak_wasm` `Program`
   (mount, dispatch, tick; a genuine DOM diff/patch, not an `innerHTML` swap),
   web-only (`wasm32-unknown-unknown`). Typed handlers replace the old numeric
@@ -40,7 +42,7 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
 
 The Monad motes are pinned to the public
 `https://github.com/monad-lang/monad.git` repository at
-`12b74e927bed6e149b9f2668f62bbf5e856d031c` (see each `mote.toml`). The
+`a9d9a8115677546e41d89af923355b374817f897` (see each `mote.toml`). The
 workspace root is virtual, so there is no root lock: `todo-core`,
 `todo-backend`, `todo-spa` and `todo-webgen` each carry their own committed
 `mote.lock`. After cloning or changing a manifest, run the only network step:
@@ -50,6 +52,30 @@ scripts/fetch-deps.sh
 ```
 
 Every build, check and test then runs `--locked` and never uses the network.
+
+**The toolchain must be the same revision as the motes.** The compiler's
+runtime implements the `#[native]` functions the pinned `std` declares, and
+that ABI changes between revisions. A mismatch is not diagnosed by
+`monad check`: the binary links and then misbehaves at runtime. On
+2026-10-29 a compiler from nightly `a9d9a81` with motes pinned to
+`12b74e92` made `ByteBuf.alloc` return a buffer whose payload pointer was
+NULL, so `todo-backend` segfaulted inside `sqlite3_open_v2` and
+`todo-webgen` read an empty `app.wasm` and pinned the empty-string hash
+(`e3b0c44…`) in the loader. The flake pins the toolchain, so the image is
+unaffected; a local `monad` from `monadup default` may not be. Check and
+switch with:
+
+```bash
+monadup list          # * marks the active toolchain
+monadup use nightly-2026-10-28-a9d9a811
+```
+
+The repo pins `a9d9a811` (the latest nightly), so `monadup default` on that
+nightly is consistent. Filed as
+`compiler-mote-revision-skew-is-not-diagnosed` in [`PLAN.md`](PLAN.md); the
+checker should reject a compiler whose revision differs from the pinned
+`std`/`runtime`, and the `db::test_db_migrates_and_round_trips` test plus
+the CI server smoke fail loudly in the meantime.
 
 ## Build and run
 

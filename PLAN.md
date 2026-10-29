@@ -895,7 +895,36 @@ Current gap entries from this app:
 `struct-update-paren-base-fails-to-parse`,
 `struct-field-access-as-if-cond-segfaults-nonzero-index`,
 `monad-test-no-path-globs-unrelated-dot-mo-files`,
-and `json-to-string-web-gate`.
+`json-to-string-web-gate`,
+and `compiler-mote-revision-skew-is-not-diagnosed`.
+
+**Found 2026-10-29, cause known** —
+`compiler-mote-revision-skew-is-not-diagnosed`: a compiler built from
+Monad nightly `a9d9a811` compiling motes pinned to `12b74e92` passes
+`monad check` and then produces a binary that segfaults. `std`'s
+`ByteBuf.alloc` changed between those revisions from a `#[native]`
+declared as returning `IO ByteBuf` to a `RawIO` native wrapped in
+`IO.mk`; against the newer runtime the old declaration yields a buffer
+whose `ByteBuf.ptr` is NULL, `Sqlite.connect` passes that as
+`sqlite3_open_v2`'s out-parameter, and SQLite writes the handle to
+address 0 inside `openDatabase` — SIGSEGV before the backend's first log
+line. The same skew made `IO.read_file` return an empty string, so
+`todo-webgen` hashed an empty `app.wasm` and pinned `e3b0c44…` (the
+empty-string SHA-256) as the loader's cache-buster. Minimal repro: a
+15-line mote calling `Sqlite.connect` on `:memory:` (crashes with the
+newer compiler, prints `opened ok` with the matching one). Diagnosis is
+a `gdb` backtrace plus `info registers` (`rsi = 0` at `openDatabase`'s
+`movq $0x0,(%rsi)`). Workaround: the toolchain must be the same revision
+as the motes (the flake pins it; a local `monadup default` may not), and
+the repo now pins `a9d9a811`. Regression cover added:
+`todo-backend/src/db.mo`'s `test_db_migrates_and_round_trips` opens a
+real connection and migrates in `monad test`, and the nightly workflow
+boots the built server, signs in through the dev stub, and posts an
+action. Upstream fix: the checker must compare the compiler's revision
+with the pinned `std`/`runtime` and reject the build with a clear
+diagnostic — a native-ABI mismatch must never reach codegen, and
+`monad test`/`monad build` must not emit a binary that crashes on the
+first `ByteBuf` use.
 The oak `HtmlT`/`Program` block is tracked under the existing
 `dict-capturing-closure-segfault` entry.
 **`moon-static-no-mime-or-binary` is resolved** (M13, upstream commits
