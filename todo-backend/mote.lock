@@ -72,6 +72,26 @@ git_subdir = "motes/oak"
 checksum = "sha256:846a1d486dc9c16d078a6944c07b83ebd32673aee28ca300fc91ad66c7d5047d"
 
 [[mote]]
+name = "sql"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/sql#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/sql"
+checksum = "sha256:d28a393ef5d6ce716cca5cb8bd4f804e810887c5eb4c4c0b940b2c05ff597170"
+
+[[mote]]
+name = "sqlite"
+version = "0.1.0"
+source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=motes/sqlite#12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_url = "https://github.com/monad-lang/monad.git"
+git_ref = "rev:12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_commit = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+git_subdir = "motes/sqlite"
+checksum = "sha256:1b21c4a7a0d54ab035cb0a7a70585c399d772d8e2a6e0eaa4f4c534e0e007ad9"
+
+[[mote]]
 name = "std"
 version = "0.1.0"
 source = "git+https://github.com/monad-lang/monad.git?rev=12b74e927bed6e149b9f2668f62bbf5e856d031c&subdir=std#12b74e927bed6e149b9f2668f62bbf5e856d031c"
