@@ -3,6 +3,7 @@
 // so this hub is mostly for bare `use todo_core` resolution and one-name
 // re-exports.
 
+pub use lib::user {*}
 pub use lib::storage {*}
 pub use lib::action {*}
 pub use lib::codec {*}

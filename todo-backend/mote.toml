@@ -1,3 +1,16 @@
+# The native backend: moon HTTP server, SQLite persistence, users/sessions
+# and the SSR/oak pages.
+#
+# Workspace-dependency hybrid: `todo_core` is a PATH dep and is inherited
+# with `workspace = true` from the root. The compiler at the pinned
+# revision does not inherit GIT deps (they resolve to an empty lock and
+# `unresolved module`), so the Monad git sources stay explicit here; the
+# canonical copy also lives in the root `[workspace.dependencies]` for the
+# future full conversion.
+#
+# The `sql`/`sqlite` driver is `#[extern "c"]`/compiled-backend-only, so it
+# is a backend dependency and never `todo-core` (which is also compiled for
+# wasm). The compiler's `lang` mote is not a dependency of this app.
 [mote]
 name = "todo-backend"
 version = "0.1.0"
@@ -15,18 +28,13 @@ git = "https://github.com/monad-lang/monad.git"
 rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
 subdir = "std"
 
-# `json` replaced `lang::json` when JSON was extracted out of the compiler
-# into its own mote (2026-10-19). The compiler's `lang` mote is no longer a
-# dependency of this app.
 [dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
 rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
 subdir = "motes/json"
 
-# The shared pure core: Todo/Storage, Action, the JSON codec, and the oak
-# view. The backend keeps only the HTTP and file-I/O layers.
 [dependencies.todo_core]
-path = "../todo-core"
+workspace = true
 
 [dependencies.moon]
 git = "https://github.com/monad-lang/monad.git"
@@ -43,11 +51,20 @@ git = "https://github.com/monad-lang/monad.git"
 rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
 subdir = "motes/log"
 
-# The CLI arg parser: --port/-p and the auto-generated --help/-h.
 [dependencies.clap]
 git = "https://github.com/monad-lang/monad.git"
 rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
 subdir = "motes/clap"
+
+[dependencies.sql]
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "motes/sql"
+
+[dependencies.sqlite]
+git = "https://github.com/monad-lang/monad.git"
+rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+subdir = "motes/sqlite"
 
 [affine]
 mode = "warn"
