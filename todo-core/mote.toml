@@ -21,27 +21,27 @@ path = "src/lib.mo"
 
 [dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "init"
 
 [dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "std"
 
 [dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/json"
 
 [dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/oak"
 
 [dependencies.xml_html]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/xml_html"
 
 [affine]

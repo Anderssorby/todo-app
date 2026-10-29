@@ -27,12 +27,12 @@ path = "src/main.mo"
 
 [dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "init"
 
 [dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "std"
 
 [dependencies.todo_core]
@@ -40,23 +40,23 @@ path = "../todo-core"
 
 [dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/oak"
 
 [dependencies.oak_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/oak_wasm"
 
 [dependencies.web_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/web_wasm"
 
 # The pure event snapshot the drop handler reads (`WebEvent.data`).
 [dependencies.web_event]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/web_event"
 
 # The typed-event ABI's C half (`web_event_*`, `dom_add_listener_global`)
@@ -65,17 +65,17 @@ subdir = "motes/web_event"
 # link at the pinned runtime instead of the toolchain's copy.
 [dependencies.runtime]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "runtime"
 
 [dependencies.xml_html]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/xml_html"
 
 [dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
+rev = "a9d9a8115677546e41d89af923355b374817f897"
 subdir = "motes/json"
 
 # NOT `log` (motes/log): `Logger.log`'s `json_lines` match arm calls
