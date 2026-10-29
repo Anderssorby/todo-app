@@ -3,7 +3,11 @@
 # The image workflow (image.yml) uses the flake's pinned toolchain. This one
 # deliberately uses `monadup default`, so it is the compatibility signal for
 # the next compiler revision: a parser/prelude/nightly regression shows up
-# here before the pin is bumped.
+# here before the pin is bumped. It also builds with a compiler that may be
+# NEWER than the pinned motes, which is the exact skew behind
+# `compiler-mote-revision-skew-is-not-diagnosed` (see PLAN.md) -- hence the
+# boot-the-server step at the end, which fails on a binary that links but
+# cannot open SQLite.
 name: nightly
 
 on:
@@ -102,3 +106,67 @@ jobs:
           node web/boot_url.test.mjs
           node web/runtime_args.test.mjs
           node web/smoke.mjs "$PWD/web/app.wasm"
+
+      # A binary that links but cannot open a SQLite database must fail the
+      # build here, not in production. `monadup default` follows the latest
+      # nightly while the motes are pinned; on 2026-10-29 that skew produced
+      # a backend that segfaulted inside `sqlite3_open_v2` while every
+      # check, test and build above passed (see PLAN.md,
+      # `compiler-mote-revision-skew-is-not-diagnosed`).
+      - name: Boot the server and exercise SQLite
+        run: |
+          db_dir="$(mktemp -d)"
+          db="$db_dir/todos.db"
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+
+          # Production mode first: unauthenticated requests are rejected.
+          ./target/debug/todo-backend --port 8095 --db "$db" &
+          server=$!
+
+          # `if` keeps a not-yet-listening connection from tripping `set -e`.
+          ready=0
+          for _ in $(seq 1 50); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8095/login; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8095/api/todos)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8095/)" = 302
+
+          kill "$server"
+          wait "$server" || true
+
+          # Then the dev stub, which makes every request the local dev user
+          # (no IdP needed) so the transactional SQLite path runs for real.
+          TODO_DEV_AUTH=1 ./target/debug/todo-backend --port 8095 --db "$db" &
+          server=$!
+
+          ready=0
+          for _ in $(seq 1 50); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8095/login; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+
+          curl -fsS http://127.0.0.1:8095/api/me | grep -q '"user"'
+          # A fresh database migrates to an EMPTY shared workspace.
+          test "$(curl -fsS http://127.0.0.1:8095/api/todos)" = "[]"
+
+          # One add through the transactional load → apply → rewrite path,
+          # then read it back through a fresh connection.
+          curl -fsS -X POST http://127.0.0.1:8095/api/actions \
+            -H 'content-type: application/json' \
+            -d '{"type":"add","title":"ci","notes":"n","group":"g","tags":["a"],"due_at":"2026-11-01"}' \
+            | grep -q '"title":"ci"'
+          curl -fsS http://127.0.0.1:8095/api/todos \
+            | grep -q '"due_at":"2026-11-01"'
+
+          kill "$server"
+          wait "$server" || true
