@@ -16,6 +16,11 @@
 # building/starting the backend. `web/boot_url.test.mjs` re-checks every
 # hash against the files.
 #
+# Workspace-dependency hybrid: this mote has no PATH deps, and the compiler
+# at the pinned revision does not inherit GIT deps, so the Monad sources
+# stay explicit; the canonical copy also lives in the root
+# `[workspace.dependencies]`.
+#
 # This is an app-side consumer of `jsgen` (the same emitter `web_wasm` uses
 # for the ABI loader); the vendored loader files themselves stay verbatim.
 [mote]

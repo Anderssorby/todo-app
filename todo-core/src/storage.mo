@@ -8,6 +8,7 @@
 /// the JSON kernel. Both use these same operations.
 
 use std::list {List.filter, List.length}
+use lib::user {UserRef}
 
 pub struct Subtask {
   id : I64,
@@ -51,7 +52,14 @@ pub struct Todo {
   tags : List String,
   group : Option String,
   subtasks : List Subtask,
-  status : Status
+  status : Status,
+  /// A date or UTC ISO-8601 string; `None` means no due date.
+  due_at : Option String,
+  /// Server-owned audit fields (UTC ISO-8601 / display names).
+  created_at : Option String,
+  updated_at : Option String,
+  created_by : Option UserRef,
+  updated_by : Option UserRef
 }
 
 pub def Todo.toggle (t : Todo) : Todo :=
@@ -61,10 +69,14 @@ pub def Todo.toggle (t : Todo) : Todo :=
 pub def Storage.seed : List Todo :=
   List.cons ({ id := 1i64, title := "Learn Monad", done := false,
                notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-               status := Status.todo } : Todo)
+               status := Status.todo, due_at := Option.none,
+               created_at := Option.none, updated_at := Option.none,
+               created_by := Option.none, updated_by := Option.none } : Todo)
   (List.cons ({ id := 2i64, title := "Build a todo app", done := false,
                 notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-                status := Status.todo } : Todo)
+                status := Status.todo, due_at := Option.none,
+                created_at := Option.none, updated_at := Option.none,
+                created_by := Option.none, updated_by := Option.none } : Todo)
   List.empty)
 
 // Foldable.foldl (init/src/foldable.mo) is unresolvable from outside its
@@ -97,12 +109,15 @@ def Storage.max_subtask_id (todos : List Todo) : I64 :=
       if I64.gt tm m then tm else m,
   }
 
-pub def Storage.add (title : String) (todos : List Todo) : List Todo :=
+pub def Storage.add (title : String) (notes : String) (group : Option String)
+    (tags : List String) (due_at : Option String) (todos : List Todo) : List Todo :=
   let next_id := I64.add (Storage.max_id todos) 1i64 in
   List.append todos (List.cons
     ({ id := next_id, title := title, done := false,
-       notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-       status := Status.todo } : Todo)
+       notes := notes, tags := tags, group := group, subtasks := List.empty,
+       status := Status.todo, due_at := due_at,
+       created_at := Option.none, updated_at := Option.none,
+       created_by := Option.none, updated_by := Option.none } : Todo)
     List.empty)
 
 pub def Storage.toggle (id : I64) (todos : List Todo) : List Todo :=
@@ -120,10 +135,12 @@ pub def Storage.set_status (id : I64) (new_status : Status) (todos : List Todo) 
 pub def Storage.delete (id : I64) (todos : List Todo) : List Todo :=
   List.filter (fn (t : Todo) => Bool.not (t.id == id)) todos
 
-pub def Storage.edit (id : I64) (title : String) (notes : String) (group : Option String) (tags : List String) (todos : List Todo) : List Todo :=
+pub def Storage.edit (id : I64) (title : String) (notes : String) (group : Option String)
+    (tags : List String) (due_at : Option String) (todos : List Todo) : List Todo :=
   List.map (fn (t : Todo) =>
     if t.id == id
-    then { t with title := title, notes := notes, group := group, tags := tags }
+    then { t with title := title, notes := notes, group := group, tags := tags,
+                  due_at := due_at }
     else t) todos
 
 pub def Storage.add_subtask (todo_id : I64) (title : String) (todos : List Todo) : List Todo :=
@@ -149,7 +166,7 @@ pub def Storage.clear_completed (todos : List Todo) : List Todo :=
 
 #[test]
 def test_add_assigns_incrementing_id : Bool :=
-  let todos := Storage.add "first" List.empty in
+  let todos := Storage.add "first" "" Option.none List.empty Option.none List.empty in
   match List.first todos {
     Option.some t => t.id == 1i64 && t.title == "first" && Bool.not t.done,
     Option.none => false
@@ -170,24 +187,41 @@ def test_delete_removes_matching_id : Bool :=
 
 #[test]
 def test_add_defaults_new_fields_empty : Bool :=
-  let todos := Storage.add "first" List.empty in
+  let todos := Storage.add "first" "" Option.none List.empty Option.none List.empty in
   match List.first todos {
     Option.some t =>
       t.notes == "" && List.length t.tags == 0i64
       && (match t.group { Option.none => true, Option.some _ => false })
-      && List.length t.subtasks == 0i64,
+      && List.length t.subtasks == 0i64
+      && (match t.due_at { Option.none => true, Option.some _ => false })
+      && (match t.created_at { Option.none => true, Option.some _ => false })
+      && (match t.created_by { Option.none => true, Option.some _ => false }),
+    Option.none => false
+  }
+
+#[test]
+def test_add_stores_due_and_form_fields : Bool :=
+  let todos := Storage.add "first" "note" (Option.some "Work")
+    (List.cons "a" List.empty) (Option.some "2026-11-01") List.empty in
+  match List.first todos {
+    Option.some t =>
+      t.notes == "note" && List.length t.tags == 1i64
+      && (match t.group { Option.some g => g == "Work", Option.none => false })
+      && (match t.due_at { Option.some d => d == "2026-11-01", Option.none => false }),
     Option.none => false
   }
 
 #[test]
 def test_edit_updates_title_notes_group_tags : Bool :=
   let tags := List.cons "work" (List.cons "urgent" List.empty) in
-  let todos := Storage.edit 1i64 "new title" "some notes" (Option.some "Work") tags Storage.seed in
+  let todos := Storage.edit 1i64 "new title" "some notes" (Option.some "Work") tags
+    (Option.some "2026-11-01") Storage.seed in
   match List.first todos {
     Option.some t =>
       t.title == "new title" && t.notes == "some notes"
       && (match t.group { Option.some g => g == "Work", Option.none => false })
-      && List.length t.tags == 2i64,
+      && List.length t.tags == 2i64
+      && (match t.due_at { Option.some d => d == "2026-11-01", Option.none => false }),
     Option.none => false
   }
 

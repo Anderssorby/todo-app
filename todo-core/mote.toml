@@ -1,6 +1,12 @@
 # The pure, wasm-portable core shared by the native backend and the wasm
-# frontend: the Todo domain, actions, the JSON codec, and the oak view.
-# No OS natives and no IO beyond what init/std provide everywhere.
+# frontend: the Todo/User domain, actions, the serde-derived JSON codec,
+# and the oak view.
+#
+# Workspace-dependency note: the compiler at the pinned revision inherits
+# PATH deps via `workspace = true` but not git deps (a git-inherited dep
+# resolves to an empty lock and `unresolved module`). The git sources stay
+# explicit here; the canonical copy also lives in the root
+# `[workspace.dependencies]` for the future full conversion.
 #
 # The mote name is `todo_core` (an underscore) because a `use` head must be
 # an identifier; the directory keeps the repo's hyphenated spelling like
