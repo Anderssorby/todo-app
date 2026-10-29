@@ -392,7 +392,9 @@ pub def View.kanban_page_html (version : String) (todos : List Todo) : String :=
 def test_item_escapes_title : Bool :=
   let todos := List.cons ({ id := 1i64, title := "<script>&\"", done := false,
     notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.todo } : Todo) List.empty in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   let html := View.fragment_html todos in
   String.contains html "&lt;script&gt;&amp;" && Bool.not (String.contains html "<script>&")
 
@@ -400,7 +402,9 @@ def test_item_escapes_title : Bool :=
 def test_done_item_renders_checked_and_class : Bool :=
   let todos := List.cons ({ id := 7i64, title := "x", done := true,
     notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.done } : Todo) List.empty in
+    status := Status.done, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   let html := View.fragment_html todos in
   String.contains html "checked" && String.contains html "class=\"todo done\""
 
@@ -412,7 +416,9 @@ def test_page_loads_the_module_script : Bool :=
 def test_item_renders_group_badge : Bool :=
   let todos := List.cons ({ id := 1i64, title := "x", done := false,
     notes := "", tags := List.empty, group := Option.some "Work", subtasks := List.empty,
-    status := Status.todo } : Todo) List.empty in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   String.contains (View.fragment_html todos) "<span class=\"group\">Work</span>"
 
 #[test]
@@ -420,7 +426,9 @@ def test_item_renders_tag_chips : Bool :=
   let tags := List.cons "urgent" (List.cons "later" List.empty) in
   let todos := List.cons ({ id := 1i64, title := "x", done := false,
     notes := "", tags := tags, group := Option.none, subtasks := List.empty,
-    status := Status.todo } : Todo) List.empty in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   let html := View.fragment_html todos in
   String.contains html "<span class=\"tag\">urgent</span>" && String.contains html "<span class=\"tag\">later</span>"
 
@@ -428,14 +436,18 @@ def test_item_renders_tag_chips : Bool :=
 def test_item_renders_notes_preview_when_present : Bool :=
   let todos := List.cons ({ id := 1i64, title := "x", done := false,
     notes := "remember this", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.todo } : Todo) List.empty in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   String.contains (View.fragment_html todos) "remember this"
 
 #[test]
 def test_item_omits_notes_preview_when_empty : Bool :=
   let todos := List.cons ({ id := 1i64, title := "x", done := false,
     notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.todo } : Todo) List.empty in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   Bool.not (String.contains (View.fragment_html todos) "notes-preview")
 
 #[test]
@@ -443,7 +455,9 @@ def test_item_renders_subtask_rows : Bool :=
   let subs := List.cons ({ id := 1i64, title := "step one", done := false } : Subtask) List.empty in
   let todos := List.cons ({ id := 1i64, title := "x", done := false,
     notes := "", tags := List.empty, group := Option.none, subtasks := subs,
-    status := Status.todo } : Todo) List.empty in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   let html := View.fragment_html todos in
   String.contains html "step one" && String.contains html "action=\"/subtasks/1/toggle\""
 
@@ -451,7 +465,9 @@ def test_item_renders_subtask_rows : Bool :=
 def test_item_renders_edit_link_not_inline_form : Bool :=
   let todos := List.cons ({ id := 1i64, title := "x", done := false,
     notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.todo } : Todo) List.empty in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
   let html := View.fragment_html todos in
   String.contains html "href=\"/todos/1/edit\"" && Bool.not (String.contains html "class=\"edit-form\"")
 
@@ -468,7 +484,9 @@ def test_edit_page_prefills_existing_values : Bool :=
   let tags := List.cons "a" List.empty in
   let t := ({ id := 1i64, title := "my title", done := false,
     notes := "my notes", tags := tags, group := Option.some "Work", subtasks := List.empty,
-    status := Status.todo } : Todo) in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) in
   let html := View.edit_page_html "testhash" t in
   String.contains html "value=\"my title\"" && String.contains html "value=\"Work\""
   && String.contains html "action=\"/todos/1/edit\""
@@ -481,7 +499,9 @@ def test_edit_not_found_page_mentions_not_found : Bool :=
 def test_kanban_page_places_cards_in_their_status_column : Bool :=
   let t := ({ id := 1i64, title := "doing task", done := false,
     notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.doing } : Todo) in
+    status := Status.doing, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) in
   let html := View.kanban_page_html "testhash" (List.cons t List.empty) in
   String.contains html "doing task" && String.contains html "action=\"/todos/1/status/todo\""
   && String.contains html "action=\"/todos/1/status/done\""
@@ -490,10 +510,14 @@ def test_kanban_page_places_cards_in_their_status_column : Bool :=
 def test_kanban_card_omits_move_buttons_at_the_ends : Bool :=
   let todo_t := ({ id := 1i64, title := "a", done := false,
     notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.todo } : Todo) in
+    status := Status.todo, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) in
   let done_t := ({ id := 2i64, title := "b", done := true,
     notes := "", tags := List.empty, group := Option.none, subtasks := List.empty,
-    status := Status.done } : Todo) in
+    status := Status.done, due_at := Option.none,
+    created_at := Option.none, updated_at := Option.none,
+    created_by := Option.none, updated_by := Option.none } : Todo) in
   let html := View.kanban_page_html "testhash" (List.cons todo_t (List.cons done_t List.empty)) in
   Bool.not (String.contains html "action=\"/todos/1/status/todo\"")
   && Bool.not (String.contains html "action=\"/todos/2/status/done\"")

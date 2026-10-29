@@ -7,17 +7,20 @@ use lib::storage {
 }
 use json::json {Json}
 use lib::codec {
-  Codec.group_to_json, Codec.json_string, Codec.status_to_json, Codec.tags_to_json
+  Codec.group_to_json, Codec.json_string, Codec.option_string_to_json,
+  Codec.status_to_json, Codec.tags_to_json
 }
 use std::map {BTreeMap}
 use std::list {List.filter, List.filter_map, List.length}
 use std::parse {Parse.i64}
 
 pub type Action {
-  add (title : String),
+  add (title : String) (notes : String) (group : Option String) (tags : List String)
+    (due_at : Option String),
   toggle (id : I64),
   delete (id : I64),
-  edit (id : I64) (title : String) (notes : String) (group : Option String) (tags : List String),
+  edit (id : I64) (title : String) (notes : String) (group : Option String)
+    (tags : List String) (due_at : Option String),
   add_subtask (id : I64) (title : String),
   toggle_subtask (id : I64),
   delete_subtask (id : I64),
@@ -30,10 +33,12 @@ pub type Action {
 
 pub def Action.apply (a : Action) (todos : List Todo) : List Todo :=
   match a {
-    add title => Storage.add title todos,
+    add title notes group tags due_at =>
+      Storage.add title notes group tags due_at todos,
     toggle id => Storage.toggle id todos,
     delete id => Storage.delete id todos,
-    edit id title notes group tags => Storage.edit id title notes group tags todos,
+    edit id title notes group tags due_at =>
+      Storage.edit id title notes group tags due_at todos,
     add_subtask id title => Storage.add_subtask id title todos,
     toggle_subtask id => Storage.toggle_subtask id todos,
     delete_subtask id => Storage.delete_subtask id todos,
@@ -75,15 +80,37 @@ def Action.group_from (fields : BTreeMap String Json) : Option String :=
     Option.none => Option.none,
   }
 
+/// A `due_at` field: a non-blank string, or `None` when absent/blank.
+def Action.due_from (fields : BTreeMap String Json) : Option String :=
+  match Json.object_get "due_at" fields {
+    Option.some j => match Json.get_str j {
+      ok s =>
+        if String.beq (String.trim s) ""
+        then Option.none
+        else Option.some s,
+      err _ => Option.none,
+    },
+    Option.none => Option.none,
+  }
+
+/// The full `add` decoder, shared by the JSON action API and the
+/// `POST /api/todos` create route. Only `title` is required; notes, group,
+/// tags and due date default for old clients.
+pub def Action.add_from_fields (fields : BTreeMap String Json) : Option Action :=
+  match Json.object_get "title" fields {
+    Option.some title_j => match Json.get_str title_j {
+      ok title => Option.some (Action.add title
+        (Action.string_field "notes" fields)
+        (Action.group_from fields)
+        (Action.tags_from fields)
+        (Action.due_from fields)),
+      err _ => Option.none,
+    },
+    Option.none => Option.none,
+  }
+
 def Action.from_kind (kind : String) (fields : BTreeMap String Json) : Option Action :=
-  if String.beq kind "add" then
-    match Json.object_get "title" fields {
-      Option.some title_j => match Json.get_str title_j {
-        ok title => Option.some (Action.add title),
-        err _ => Option.none,
-      },
-      Option.none => Option.none,
-    }
+  if String.beq kind "add" then Action.add_from_fields fields
   else if String.beq kind "toggle" then
     match Action.id_from fields {
       Option.some id => Option.some (Action.toggle id),
@@ -98,7 +125,8 @@ def Action.from_kind (kind : String) (fields : BTreeMap String Json) : Option Ac
     match Action.id_from fields {
       Option.some id => Option.some (Action.edit id
         (Action.string_field "title" fields) (Action.string_field "notes" fields)
-        (Action.group_from fields) (Action.tags_from fields)),
+        (Action.group_from fields) (Action.tags_from fields)
+        (Action.due_from fields)),
       Option.none => Option.none,
     }
   else if String.beq kind "add_subtask" then
@@ -160,8 +188,13 @@ pub def Action.from_json (j : Json) : Option Action :=
 
 pub def Action.to_json (a : Action) : String :=
   match a {
-    add title => String.concat_list [
-      "{\"type\":\"add\",\"title\":", Codec.json_string title, "}"
+    add title notes group tags due_at => String.concat_list [
+      "{\"type\":\"add\",\"title\":", Codec.json_string title,
+      ",\"notes\":", Codec.json_string notes,
+      ",\"group\":", Codec.group_to_json group,
+      ",\"tags\":", Codec.tags_to_json tags,
+      ",\"due_at\":", Codec.option_string_to_json due_at,
+      "}"
     ],
     toggle id => String.concat_list [
       "{\"type\":\"toggle\",\"id\":", I64.to_string id, "}"
@@ -169,12 +202,13 @@ pub def Action.to_json (a : Action) : String :=
     delete id => String.concat_list [
       "{\"type\":\"delete\",\"id\":", I64.to_string id, "}"
     ],
-    edit id title notes group tags => String.concat_list [
+    edit id title notes group tags due_at => String.concat_list [
       "{\"type\":\"edit\",\"id\":", I64.to_string id,
       ",\"title\":", Codec.json_string title,
       ",\"notes\":", Codec.json_string notes,
       ",\"group\":", Codec.group_to_json group,
       ",\"tags\":", Codec.tags_to_json tags,
+      ",\"due_at\":", Codec.option_string_to_json due_at,
       "}"
     ],
     add_subtask id title => String.concat_list [
@@ -247,6 +281,47 @@ def test_add_action_appends : Bool :=
       match List.last todos {
         Option.some t => t.title == "from json",
         Option.none => false
+      },
+    Option.none => false
+  }
+
+#[test]
+def test_add_action_decodes_full_fields : Bool :=
+  match Action.from_json (Json.make_object_pairs [
+    Pair.pair "type" (Json.make_str "add"),
+    Pair.pair "title" (Json.make_str "full"),
+    Pair.pair "notes" (Json.make_str "n"),
+    Pair.pair "group" (Json.make_str "G"),
+    Pair.pair "tags" (Json.make_array [Json.make_str "a", Json.make_str "b"]),
+    Pair.pair "due_at" (Json.make_str "2026-11-01")
+  ]) {
+    Option.some a =>
+      let todos := Action.apply a Storage.seed in
+      match List.last todos {
+        Option.some t =>
+          t.notes == "n"
+          && (match t.group { Option.some g => g == "G", Option.none => false })
+          && List.length t.tags == 2i64
+          && (match t.due_at { Option.some d => d == "2026-11-01", Option.none => false }),
+        Option.none => false,
+      },
+    Option.none => false
+  }
+
+#[test]
+def test_add_action_defaults_new_fields_from_title_only : Bool :=
+  match Action.from_json (Json.make_object_pairs [
+    Pair.pair "type" (Json.make_str "add"),
+    Pair.pair "title" (Json.make_str "old client")
+  ]) {
+    Option.some a =>
+      let todos := Action.apply a Storage.seed in
+      match List.last todos {
+        Option.some t =>
+          t.notes == "" && List.length t.tags == 0i64
+          && (match t.group { Option.none => true, Option.some _ => false })
+          && (match t.due_at { Option.none => true, Option.some _ => false }),
+        Option.none => false,
       },
     Option.none => false
   }
@@ -334,7 +409,7 @@ def test_clear_completed_action_from_json : Bool :=
 #[test]
 def test_to_json_round_trips_edit : Bool :=
   let a := Action.edit 1i64 "new title" "some notes" (Option.some "Work")
-    (List.cons "a" (List.cons "b" List.empty)) in
+    (List.cons "a" (List.cons "b" List.empty)) (Option.some "2026-11-01") in
   match Json.parse (Action.to_json a) {
     ok j => match Action.from_json j {
       Option.some b =>
@@ -343,7 +418,8 @@ def test_to_json_round_trips_edit : Bool :=
           Option.some t =>
             t.title == "new title" && t.notes == "some notes"
             && (match t.group { Option.some g => g == "Work", Option.none => false })
-            && List.length t.tags == 2i64,
+            && List.length t.tags == 2i64
+            && (match t.due_at { Option.some d => d == "2026-11-01", Option.none => false }),
           Option.none => false,
         },
       Option.none => false,
@@ -353,7 +429,8 @@ def test_to_json_round_trips_edit : Bool :=
 
 #[test]
 def test_to_json_escapes_strings : Bool :=
-  let json := Action.to_json (Action.add "a\"b\\c") in
+  let json := Action.to_json
+    (Action.add "a\"b\\c" "" Option.none List.empty Option.none) in
   String.contains json "\\\"" && String.contains json "\\\\"
 
 #[test]

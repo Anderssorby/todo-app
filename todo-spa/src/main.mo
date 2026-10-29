@@ -646,7 +646,8 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
       if String.beq (String.trim model.new_title) ""
       then Pair.pair model Command.none
       else Pair.pair { model with pending_form := Option.some PendingForm.pending_add }
-        (Command.perform (Effect.sync (Action.add model.new_title))),
+        (Command.perform (Effect.sync
+          (Action.add model.new_title "" Option.none List.empty Option.none))),
     Msg.set_edit_title text =>
       Pair.pair { model with edit_title := text } Command.none,
     Msg.set_edit_notes text =>
@@ -661,7 +662,8 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
       else Pair.pair { model with pending_form := Option.some (PendingForm.pending_edit id) }
         (Command.perform (Effect.sync
           (Action.edit id model.edit_title model.edit_notes
-            (Action.group_of_text model.edit_group) (Action.tags_of_text model.edit_tags)))),
+            (Action.group_of_text model.edit_group) (Action.tags_of_text model.edit_tags)
+            Option.none))),
     Msg.set_subtask_title id text =>
       Pair.pair { model with
         subtask_drafts := Spa.set_subtask_draft id text model.subtask_drafts } Command.none,

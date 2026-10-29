@@ -1,14 +1,25 @@
 # The browser SPA: a real oak_wasm Program (mount/dispatch/tick,
-# diff/patch over the DOM) instead of the one-shot `todo-frontend` kernel's
-# `app.innerHTML = result.html` swap. `targets = ["web"]` records that its
-# code is only meaningful there (it reaches web_wasm's DOM/fetch/storage/
-# console externs); availability is enforced per extern at codegen, same as
+# diff/patch over the DOM). `targets = ["web"]` records that its code is
+# only meaningful there (it reaches web_wasm's DOM/fetch/storage/console
+# externs); availability is enforced per extern at codegen, same as
 # `web_wasm`/`oak_wasm` themselves, so `monad check` still runs everywhere.
+#
+# Workspace-dependency hybrid: `todo_core` is a PATH dep and is inherited
+# with `workspace = true` from the root. The compiler at the pinned
+# revision does not inherit GIT deps, so the Monad sources stay explicit
+# here; the canonical copy also lives in the root
+# `[workspace.dependencies]` for the future full conversion.
+#
+# `[lib]` is the root for the component modules under `src/components/`;
+# `[bin]` stays the wasm entry.
 [mote]
 name = "todo_spa"
 version = "0.1.0"
 edition = "2026"
 targets = ["web"]
+
+[lib]
+path = "src/lib.mo"
 
 [bin]
 name = "todo-spa"
@@ -25,7 +36,7 @@ rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
 subdir = "std"
 
 [dependencies.todo_core]
-path = "../todo-core"
+workspace = true
 
 [dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
@@ -49,7 +60,7 @@ rev = "12b74e927bed6e149b9f2668f62bbf5e856d031c"
 subdir = "motes/web_event"
 
 # The typed-event ABI's C half (`web_event_*`, `dom_add_listener_global`)
-# is pinned to the same Monad git revision as the other motes; the installed
+# is pinned to the same Monad revision as the other motes; the installed
 # nightly predates it. The manifest tier is how an external mote points the
 # link at the pinned runtime instead of the toolchain's copy.
 [dependencies.runtime]
@@ -71,8 +82,7 @@ subdir = "motes/json"
 # `Json.to_string`, which reaches the web-gated `F64.to_string` -- this
 # makes the whole mote unreachable-unsafe on `wasm32-unknown-unknown`
 # even when only `plain_text`/`Console.log` is used (filed as
-# `log-mote-not-web-safe`). `App.logger` below is a direct `Console.log`
-# stand-in until that's fixed upstream.
+# `log-mote-not-web-safe`).
 
 [affine]
 mode = "warn"
