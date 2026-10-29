@@ -86,7 +86,9 @@ jobs:
       - name: Check and test
         run: |
           monad check --workspace --locked
-          monad test --workspace --locked
+          # Directory arguments deliberately, not --workspace: the SPA is a
+          # web-only target with no native tests.
+          monad test --locked todo-core/src todo-backend/src todo-webgen/src
 
       - name: Build
         run: |
