@@ -19,7 +19,7 @@
 /// breaks this target regardless of which format is actually used.
 use todo_core::storage {Status, Subtask, Todo}
 use todo_core::action {Action}
-use todo_core::codec {Codec.todos_from_json, Codec.todos_to_json}
+use todo_core::codec_web {CodecWeb.todos_from_json, CodecWeb.todos_to_json}
 use todo_core::view {View.css, View.group_badge, View.tag_chip}
 use oak::typed {Oak.Attr, Oak.Node}
 use oak::elements {
@@ -773,7 +773,7 @@ def Spa.resolve (rid : RequestId) : IO (Option Msg) := do {
     }
     else do {
       let body <- Spa.read_all rid "";
-      match Codec.todos_from_json body {
+      match CodecWeb.todos_from_json body {
         Option.some todos => return (Option.some (Msg.loaded todos)),
         Option.none => do {
           let _ <- Console.log ("todo-spa WARN unparseable response: " ++ body);
@@ -800,7 +800,7 @@ def Spa.run_effect (effect : Effect) : IO (Option Msg) :=
     },
     Effect.check rid => Spa.resolve rid,
     Effect.cache todos => do {
-      let _ <- Storage.set Spa.cache_key (Codec.todos_to_json todos);
+      let _ <- Storage.set Spa.cache_key (CodecWeb.todos_to_json todos);
       return Option.none
     },
     Effect.save_prefs dark hide => do {
@@ -842,7 +842,7 @@ def host : Host IO Effect Msg := Host.host Spa.run_effect
 
 def Spa.model_from_cache (cached : Option String) : Model :=
   match cached {
-    Option.some text => match Codec.todos_from_json text {
+    Option.some text => match CodecWeb.todos_from_json text {
       Option.some todos => { Model.empty with todos := todos },
       Option.none => Model.empty,
     },

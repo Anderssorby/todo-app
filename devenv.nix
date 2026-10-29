@@ -22,6 +22,11 @@ in
     # $WASI_SDK_PATH (see nix/wasi-sdk.nix).
     wasmtime
     nodejs
+    # The backend links libsqlite3 through the sqlite mote's
+    # `[link] pkg-config = ["sqlite3"]`; pkg-config resolves the store path
+    # and the CLI is useful for manual state checks.
+    sqlite
+    pkg-config
   ];
 
   # The pinned wasi-sdk tarball is the x86_64-linux release. On any other

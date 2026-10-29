@@ -6,6 +6,10 @@
 pub use lib::user {*}
 pub use lib::storage {*}
 pub use lib::action {*}
-pub use lib::codec {*}
 pub use lib::view {*}
-pub use lib::kernel {*}
+
+// `codec` (native serde derive) and `kernel` are deliberately not
+// re-exported: loading them through the SPA's dependency graph triggers the
+// derive-reflection gap, and nothing imports the crate root. Consumers use
+// `todo_core::codec` (backend), `todo_core::codec_web` (wasm) or
+// `todo_core::json_text` directly.

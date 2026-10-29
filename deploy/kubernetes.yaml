@@ -1,7 +1,7 @@
-# One replica only: the backend rewrites /state/todos.json in place with no
-# locking, fsync or atomic rename (todo-backend/src/persist.mo). Multiple
-# writers -- another pod or a rolling surge -- can lose updates or replace
-# valid state with the seed. Recreate + a ReadWriteOnce PVC avoids both.
+# One replica only: SQLite is a local file with a WAL, not a shared database.
+# The backend's transactions serialize writers inside the pod, but two pods
+# must not open the same database on a ReadWriteOnce PVC. Recreate + RWO is
+# still required; a multi-replica deployment needs a real database.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -51,7 +51,7 @@ spec:
         - name: todo-app
           image: ghcr.io/anderssorby/todo-app:latest
           imagePullPolicy: Always
-          args: ["--port", "8095"]
+          args: ["--port", "8095", "--db", "/state/todos.db"]
           ports:
             - name: http
               containerPort: 8095

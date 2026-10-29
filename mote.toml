@@ -1,11 +1,15 @@
 # Virtual workspace root for the todo-app repository: no [mote] of its
 # own, just the member list and the shared dependency sources.
 #
-# Every member declares its dependencies with `workspace = true`; the
-# source (git pin + subdir, or the intra-repo path) lives exactly once in
-# `[workspace.dependencies]` below. The Monad motes are pinned to the same
-# public revision in every source, and every build/check/test runs
-# `--locked` (the per-member `mote.lock` files are committed).
+# `[workspace.dependencies]` below is the canonical source list. The pinned
+# compiler's `workspace = true` inheritance cannot be used by the members
+# yet: it resolves a dependency ROOT but not its submodules
+# (`todo_core::storage` is unresolved), and it does not inherit git deps
+# (they resolve to an empty lock). The members therefore keep explicit
+# sources; this table is the one copy to switch them to when that lands.
+# The Monad motes are pinned to the same public revision in every source,
+# and every build/check/test runs `--locked` (the per-member `mote.lock`
+# files are committed).
 #
 # Sub-table headers, not inline tables: both readers accept either, but
 # this is the Monad corpus's house style and the form the rest of this
