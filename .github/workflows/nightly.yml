@@ -113,6 +113,8 @@ jobs:
           node web/boot_url.test.mjs
           node web/runtime_args.test.mjs
           node web/smoke.mjs "$PWD/web/app.wasm"
+          # A 401 from /api/me must show the sign-in view, not a broken page.
+          SMOKE_UNAUTH=1 node web/smoke.mjs "$PWD/web/app.wasm"
 
       # A binary that links but cannot open a SQLite database must fail the
       # build here, not in production. `monadup default` follows the latest
@@ -163,17 +165,34 @@ jobs:
           test "$ready" = 1
 
           curl -fsS http://127.0.0.1:8095/api/me | grep -q '"user"'
+          # A new user starts at UTC; the offset update is validated and
+          # echoed by POST /api/me.
+          curl -fsS http://127.0.0.1:8095/api/me | grep -q '"utc_offset_minutes":0'
+          curl -fsS -X POST http://127.0.0.1:8095/api/me \
+            -H 'content-type: application/json' \
+            -d '{"utc_offset_minutes":120}' | grep -q '"utc_offset_minutes":120'
+          # An invalid offset is a client error, not a stored value.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            http://127.0.0.1:8095/api/me -H 'content-type: application/json' \
+            -d '{"utc_offset_minutes":7}')" = 400
+
           # A fresh database migrates to an EMPTY shared workspace.
           test "$(curl -fsS http://127.0.0.1:8095/api/todos)" = "[]"
 
           # One add through the transactional load → apply → rewrite path,
-          # then read it back through a fresh connection.
+          # then read it back through a fresh connection. Timestamps are
+          # ISO-8601 UTC (migration 2 normalises them).
           curl -fsS -X POST http://127.0.0.1:8095/api/actions \
             -H 'content-type: application/json' \
             -d '{"type":"add","title":"ci","notes":"n","group":"g","tags":["a"],"due_at":"2026-11-01"}' \
             | grep -q '"title":"ci"'
-          curl -fsS http://127.0.0.1:8095/api/todos \
-            | grep -q '"due_at":"2026-11-01"'
+          todos="$(curl -fsS http://127.0.0.1:8095/api/todos)"
+          printf '%s' "$todos" | grep -q '"due_at":"2026-11-01"'
+          printf '%s' "$todos" | grep -Eq '"created_at":"[0-9T:-]+Z"'
+          # An invalid due date is rejected before it reaches the row.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            http://127.0.0.1:8095/api/actions -H 'content-type: application/json' \
+            -d '{"type":"add","title":"bad","due_at":"2026-13-01"}')" = 400
 
           kill "$server"
           wait "$server" || true
