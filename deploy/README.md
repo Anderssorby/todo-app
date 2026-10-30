@@ -97,13 +97,15 @@ two pods, even on a filesystem that pretends to support RWX. Therefore:
 - a `ReadWriteOnce` PVC (no RWX/multi-pod);
 - no HPA, no rolling updates, no shared state between pods.
 
-Within the one pod, `Server.serve_concurrent` runs up to 16 handlers, but
-every mutation is a single `BEGIN IMMEDIATE` transaction that loads, applies
-the shared `Action`, and rewrites the rows (`todo-backend/src/db.mo`), so
-concurrent writers serialize (bounded by the driver's 5 s busy timeout)
-instead of losing an update. A multi-replica deployment needs a client/server
-database and sessions external to the pod; that is a backend change, not a
-manifest change.
+Within the one pod, every connection is served on its own fiber by the accept
+loop in `todo-backend/src/serve.mo` (moon's `Server.serve_concurrent` is not
+used: it drains its whole batch before accepting again, so idle keep-alive
+sockets park it). Every mutation is a single `BEGIN IMMEDIATE` transaction
+that loads, applies the shared `Action`, and rewrites the rows
+(`todo-backend/src/db.mo`), so concurrent writers serialize (bounded by the
+driver's 5 s busy timeout) instead of losing an update. A multi-replica
+deployment needs a client/server database and sessions external to the pod;
+that is a backend change, not a manifest change.
 
 ## Known SPA limits
 
