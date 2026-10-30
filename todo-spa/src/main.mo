@@ -19,14 +19,20 @@
 /// breaks this target regardless of which format is actually used.
 use todo_core::storage {Status, Subtask, Todo}
 use todo_core::action {Action}
-use todo_core::codec_web {CodecWeb.todos_from_json, CodecWeb.todos_to_json}
+use todo_core::codec_web {
+  CodecWeb.me_offset_from_json, CodecWeb.todos_from_json, CodecWeb.todos_to_json
+}
 use todo_core::view {View.css, View.group_badge, View.tag_chip}
+use todo_core::notes {Notes.markdown}
+use todo_core::stamp {
+  Stamp.created_line, Stamp.due_label, Stamp.offset_choices, Stamp.updated_line
+}
 use oak::typed {Oak.Attr, Oak.Node}
 use oak::elements {
-  Html.attr, Html.button, Html.class_, Html.div, Html.draggable, Html.footer,
-  Html.h1, Html.input, Html.key, Html.li, Html.name_, Html.nav, Html.node, Html.p,
-  Html.placeholder, Html.required, Html.span, Html.text, Html.textarea, Html.type_,
-  Html.ul, Html.value_
+  Html.a, Html.attr, Html.button, Html.class_, Html.div, Html.draggable, Html.footer,
+  Html.h1, Html.href, Html.input, Html.key, Html.li, Html.name_, Html.nav, Html.node,
+  Html.option, Html.p, Html.placeholder, Html.required, Html.select, Html.selected,
+  Html.span, Html.text, Html.textarea, Html.type_, Html.ul, Html.value_
 }
 use oak::events {
   Html.drag_effect, Html.drag_payload, Html.drop_effect, Html.on, Html.on_change,
@@ -40,6 +46,7 @@ use web_wasm::fetch {Fetch.begin, Fetch.poll, Fetch.read, Fetch.status}
 use web_wasm::storage {Storage.get, Storage.set}
 use web_wasm::console {Console.log}
 use web_wasm::types {RequestId}
+use std::parse {Parse.i64}
 use std::list {
   List.any, List.contains_by, List.filter, List.filter_map, List.intercalate, List.length,
   List.sort_by
@@ -59,20 +66,37 @@ type PendingForm {
   pending_subtask (id : I64),
 }
 
+/// Which endpoint the in-flight request targets; `Spa.resolve` parses the
+/// body differently for each.
+type RequestKind { todos, me, offset }
+
 struct Model {
   todos : List Todo,
   pending : Option RequestId,
+  pending_kind : RequestKind,
   loaded : Bool,
+  /// The profile was read from `/api/me`; the todo load starts after it.
+  me_loaded : Bool,
+  signed_in : Bool,
+  /// A 401 stopped the pump and the login view is showing.
+  auth_required : Bool,
+  /// The user's fixed display offset east of UTC, in minutes.
+  utc_offset_minutes : I64,
   page : Tab,
   dark_mode : Bool,
   hide_completed : Bool,
   filter_group : Option String,
   filter_tag : Option String,
   new_title : String,
+  new_notes : String,
+  new_group : String,
+  new_tags : String,
+  new_due : String,
   edit_title : String,
   edit_notes : String,
   edit_group : String,
   edit_tags : String,
+  edit_due : String,
   subtask_drafts : List (Pair I64 String),
   subtask_generation : I64,
   pending_form : Option PendingForm,
@@ -85,11 +109,14 @@ struct Model {
 }
 
 def Model.empty : Model :=
-  { todos := List.empty, pending := Option.none, loaded := false,
+  { todos := List.empty, pending := Option.none, pending_kind := RequestKind.todos,
+    loaded := false, me_loaded := false, signed_in := false, auth_required := false,
+    utc_offset_minutes := 0i64,
     page := Tab.tasks, dark_mode := false, hide_completed := false,
     filter_group := Option.none, filter_tag := Option.none,
-    new_title := "", edit_title := "", edit_notes := "", edit_group := "",
-    edit_tags := "", subtask_drafts := List.empty, subtask_generation := 0i64,
+    new_title := "", new_notes := "", new_group := "", new_tags := "", new_due := "",
+    edit_title := "", edit_notes := "", edit_group := "", edit_tags := "", edit_due := "",
+    subtask_drafts := List.empty, subtask_generation := 0i64,
     pending_form := Option.none, drag_id := Option.none, drag_over := Option.none,
     error := Option.none }
 
@@ -110,11 +137,16 @@ type Msg {
   clear_tag_filter,
   // Typing controls.
   set_new_title (text : String),
+  set_new_notes (text : String),
+  set_new_group (text : String),
+  set_new_tags (text : String),
+  set_new_due (text : String),
   submit_new,
   set_edit_title (text : String),
   set_edit_notes (text : String),
   set_edit_group (text : String),
   set_edit_tags (text : String),
+  set_edit_due (text : String),
   submit_edit (id : I64),
   set_subtask_title (id : I64) (text : String),
   submit_subtask (id : I64),
@@ -126,9 +158,13 @@ type Msg {
   drag_over_on (status : Status),
   drag_end,
   drop_todo (status : Status) (raw : String),
-  // Fetch lifecycle.
+  // Fetch lifecycle. `/api/me` runs first; a 401 shows the login view.
   poll,
-  began (rid : RequestId),
+  began (kind : RequestKind) (rid : RequestId),
+  me_loaded (offset : I64),
+  login_required,
+  offset_changed (text : String),
+  offset_saved (offset : I64),
   loaded (todos : List Todo),
   failed (reason : String),
   retry_load
@@ -136,9 +172,12 @@ type Msg {
 
 type Effect {
   load,
+  load_me,
   sync (action : Action),
-  check (rid : RequestId),
+  update_offset (minutes : I64),
+  check (kind : RequestKind) (rid : RequestId),
   cache (todos : List Todo),
+  clear_cache,
   save_prefs (dark : Bool) (hide : Bool)
 }
 
@@ -266,9 +305,33 @@ def Spa.subtasks_block (model : Model) (t : Todo) : Oak.Node Msg :=
         (List.map Spa.subtask_row t.subtasks),
       controls ]
 
+def Spa.due_chips (model : Model) (t : Todo) : List (Oak.Node Msg) :=
+  match Stamp.due_label model.utc_offset_minutes t.due_at {
+    Option.some label =>
+      List.cons (Html.span [Html.class_ ["due"]] [Html.text label]) List.empty,
+    Option.none => List.empty,
+  }
+
+def Spa.audit_lines (model : Model) (t : Todo) : List (Oak.Node Msg) :=
+  let created :=
+    match Stamp.created_line model.utc_offset_minutes t {
+      Option.some line =>
+        List.cons (Html.p [Html.class_ ["todo-audit"]] [Html.text line]) List.empty,
+      Option.none => List.empty,
+    } in
+  let updated :=
+    match Stamp.updated_line model.utc_offset_minutes t {
+      Option.some line =>
+        List.cons (Html.p [Html.class_ ["todo-audit"]] [Html.text line]) List.empty,
+      Option.none => List.empty,
+    } in
+  List.append created updated
+
 def Spa.item (model : Model) (t : Todo) : Oak.Node Msg :=
   let badge : Oak.Node Msg := View.group_badge t.group in
   let chips : List (Oak.Node Msg) := List.map (fn (tag : String) => View.tag_chip tag) t.tags in
+  let meta := List.append (List.cons badge List.empty)
+    (List.append chips (Spa.due_chips model t)) in
   Html.li [Html.class_ (if t.done then ["todo", "done"] else ["todo"])]
     [ Html.div [Html.class_ ["todo-main"]]
         [ Html.button
@@ -278,7 +341,9 @@ def Spa.item (model : Model) (t : Todo) : Oak.Node Msg :=
           Html.button
             [Spa.on_click (Msg.switch_tab (Tab.edit_task t.id))]
             [Html.text "Edit"] ],
-      Html.div [Html.class_ ["todo-meta"]] (List.append (List.cons badge List.empty) chips),
+      Html.div [Html.class_ ["todo-meta"]] meta,
+      Notes.markdown t.notes,
+      Html.div [Html.class_ ["todo-audit-lines"]] (Spa.audit_lines model t),
       Spa.subtasks_block model t ]
 
 def Spa.matches_group (filter : Option String) (t : Todo) : Bool :=
@@ -391,10 +456,43 @@ def Spa.setting_row (label : String) (on : Bool) (msg : Msg) : Oak.Node Msg :=
       Html.button [Spa.on_click msg, Html.class_ ["switch"]]
         [Html.text (if on then "On" else "Off")] ]
 
+def Spa.offset_option (current : I64) (pair : Pair I64 String) : Oak.Node Msg :=
+  match pair {
+    Pair.pair minutes label =>
+      let selected_attrs : List (Oak.Attr Msg) :=
+        if I64.beq minutes current
+        then List.cons Html.selected List.empty
+        else List.empty in
+      let attrs : List (Oak.Attr Msg) :=
+        List.cons (Html.value_ (I64.to_string minutes)) selected_attrs in
+      Html.option attrs [Html.text label]
+  }
+
+/// The display offset is a fixed number of minutes (no IANA/DST at this Monad
+/// revision); changing it posts `/api/me` and the server returns the updated
+/// profile.
 def Spa.settings_view (model : Model) : Oak.Node Msg :=
   Html.div [Html.class_ ["settings-tab"]]
     [ Spa.setting_row "Dark mode" model.dark_mode Msg.toggle_dark_mode,
-      Spa.setting_row "Hide completed" model.hide_completed Msg.toggle_hide_completed ]
+      Spa.setting_row "Hide completed" model.hide_completed Msg.toggle_hide_completed,
+      Html.div [Html.class_ ["setting-row"]]
+        [ Html.span List.empty [Html.text "Time zone"],
+          Html.select
+            [ Html.name_ "utc_offset_minutes",
+              Html.on_change (fn (text : String) => Msg.offset_changed text) ]
+            (List.map (Spa.offset_option model.utc_offset_minutes)
+              Stamp.offset_choices) ] ]
+
+def Spa.login_view : Oak.Node Msg :=
+  Html.div [Html.class_ ["login-view"]]
+    [ Html.h1 List.empty [Html.text "todo-app"],
+      Html.p List.empty
+        [Html.text "Sign-in is not enabled in this build. For local use, start the server with TODO_DEV_AUTH=1."],
+      Html.p List.empty
+        [ Html.a [Html.href "/auth/login"] [Html.text "Open the sign-in page"],
+          Html.text " or ",
+          Html.button [Html.type_ "button", Spa.on_click Msg.retry_load]
+            [Html.text "retry"] ] ]
 
 def Spa.tasks_view (model : Model) : Oak.Node Msg :=
   Html.div List.empty
@@ -411,6 +509,23 @@ def Spa.add_controls (model : Model) : Oak.Node Msg :=
           Html.type_ "text", Html.value_ model.new_title,
           Html.on_input (fn (text : String) => Msg.set_new_title text),
           Spa.on_enter Msg.submit_new ],
+      Html.textarea
+        [ Html.name_ "notes", Html.placeholder "Notes (Markdown)",
+          Html.on_change (fn (text : String) => Msg.set_new_notes text) ]
+        [Html.text model.new_notes],
+      Html.input
+        [ Html.name_ "group", Html.value_ model.new_group, Html.type_ "text",
+          Html.placeholder "Group",
+          Html.on_input (fn (text : String) => Msg.set_new_group text),
+          Spa.on_enter Msg.submit_new ],
+      Html.input
+        [ Html.name_ "tags", Html.value_ model.new_tags, Html.type_ "text",
+          Html.placeholder "Tags (comma separated)",
+          Html.on_input (fn (text : String) => Msg.set_new_tags text),
+          Spa.on_enter Msg.submit_new ],
+      Html.input
+        [ Html.name_ "due_at", Html.value_ model.new_due, Html.type_ "date",
+          Html.on_change (fn (text : String) => Msg.set_new_due text) ],
       Html.button
         [Html.type_ "button", Spa.on_click Msg.submit_new]
         [Html.text "Add"] ]
@@ -447,6 +562,9 @@ def Spa.edit_controls (model : Model) (t : Todo) : Oak.Node Msg :=
           Html.placeholder "Tags (comma separated)",
           Html.on_input (fn (text : String) => Msg.set_edit_tags text),
           Spa.on_enter (Msg.submit_edit t.id) ],
+      Html.input
+        [ Html.name_ "due_at", Html.value_ model.edit_due, Html.type_ "date",
+          Html.on_change (fn (text : String) => Msg.set_edit_due text) ],
       Html.button
         [Html.type_ "button", Spa.on_click (Msg.submit_edit t.id)]
         [Html.text "Save"] ]
@@ -545,7 +663,9 @@ def Spa.error_banner (model : Model) : Oak.Node Msg :=
   }
 
 def Spa.view (model : Model) : Oak.Node Msg :=
-  Html.div
+  if model.auth_required
+  then Spa.login_view
+  else Html.div
     [ Html.class_ ["todo-app"],
       Html.attr "data-theme" (if model.dark_mode then "dark" else "light") ]
     [ Html.h1 List.empty [Html.text "todo-app"],
@@ -585,15 +705,21 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
             Option.some t =>
               Pair.pair { model with page := Tab.edit_task id,
                 edit_title := t.title, edit_notes := t.notes,
-                edit_group := Spa.group_text t.group, edit_tags := Spa.tags_text t.tags }
+                edit_group := Spa.group_text t.group, edit_tags := Spa.tags_text t.tags,
+                edit_due := (match t.due_at {
+                  Option.some due => due,
+                  Option.none => "",
+                }) }
                 Command.none,
             Option.none =>
               Pair.pair { model with page := Tab.edit_task id,
-                edit_title := "", edit_notes := "", edit_group := "", edit_tags := "" }
+                edit_title := "", edit_notes := "", edit_group := "", edit_tags := "",
+                edit_due := "" }
                 Command.none,
           },
         Tab.new_task =>
-          Pair.pair { model with page := Tab.new_task, new_title := "" } Command.none,
+          Pair.pair { model with page := Tab.new_task, new_title := "",
+            new_notes := "", new_group := "", new_tags := "", new_due := "" } Command.none,
         Tab.tasks => Pair.pair { model with page := Tab.tasks } Command.none,
         Tab.kanban => Pair.pair { model with page := Tab.kanban } Command.none,
         Tab.settings => Pair.pair { model with page := Tab.settings } Command.none,
@@ -642,12 +768,22 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
     Msg.clear_tag_filter => Pair.pair { model with filter_tag := Option.none } Command.none,
     Msg.set_new_title text =>
       Pair.pair { model with new_title := text } Command.none,
+    Msg.set_new_notes text =>
+      Pair.pair { model with new_notes := text } Command.none,
+    Msg.set_new_group text =>
+      Pair.pair { model with new_group := text } Command.none,
+    Msg.set_new_tags text =>
+      Pair.pair { model with new_tags := text } Command.none,
+    Msg.set_new_due text =>
+      Pair.pair { model with new_due := text } Command.none,
     Msg.submit_new =>
       if String.beq (String.trim model.new_title) ""
       then Pair.pair model Command.none
       else Pair.pair { model with pending_form := Option.some PendingForm.pending_add }
         (Command.perform (Effect.sync
-          (Action.add model.new_title "" Option.none List.empty Option.none))),
+          (Action.add model.new_title model.new_notes
+            (Action.group_of_text model.new_group) (Action.tags_of_text model.new_tags)
+            (Spa.option_text model.new_due)))),
     Msg.set_edit_title text =>
       Pair.pair { model with edit_title := text } Command.none,
     Msg.set_edit_notes text =>
@@ -656,6 +792,8 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
       Pair.pair { model with edit_group := text } Command.none,
     Msg.set_edit_tags text =>
       Pair.pair { model with edit_tags := text } Command.none,
+    Msg.set_edit_due text =>
+      Pair.pair { model with edit_due := text } Command.none,
     Msg.submit_edit id =>
       if String.beq (String.trim model.edit_title) ""
       then Pair.pair model Command.none
@@ -663,7 +801,7 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
         (Command.perform (Effect.sync
           (Action.edit id model.edit_title model.edit_notes
             (Action.group_of_text model.edit_group) (Action.tags_of_text model.edit_tags)
-            Option.none))),
+            (Spa.option_text model.edit_due)))),
     Msg.set_subtask_title id text =>
       Pair.pair { model with
         subtask_drafts := Spa.set_subtask_draft id text model.subtask_drafts } Command.none,
@@ -691,25 +829,50 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
       },
     Msg.poll =>
       match model.pending {
-        Option.some rid => Pair.pair model (Command.perform (Effect.check rid)),
+        Option.some rid =>
+          Pair.pair model (Command.perform (Effect.check model.pending_kind rid)),
         Option.none =>
-          if model.loaded
+          if model.auth_required
           then Pair.pair model Command.none
-          else Pair.pair { model with loaded := true } (Command.perform Effect.load),
+          else if model.me_loaded then
+            if model.loaded
+            then Pair.pair model Command.none
+            else Pair.pair { model with loaded := true } (Command.perform Effect.load)
+          else Pair.pair model (Command.perform Effect.load_me),
       },
-    Msg.began rid =>
-      Pair.pair { model with pending := Option.some rid, error := Option.none } Command.none,
+    Msg.began kind rid =>
+      Pair.pair { model with pending := Option.some rid, pending_kind := kind,
+        error := Option.none } Command.none,
+    Msg.me_loaded offset =>
+      Pair.pair { model with pending := Option.none, me_loaded := true,
+        signed_in := true, utc_offset_minutes := offset, loaded := false,
+        error := Option.none } (Command.perform Effect.load),
+    Msg.login_required =>
+      Pair.pair { model with todos := List.empty, pending := Option.none,
+        me_loaded := false, signed_in := false, auth_required := true,
+        loaded := true, error := Option.none } (Command.perform Effect.clear_cache),
+    Msg.offset_changed text =>
+      match Parse.i64 (String.trim text) {
+        Option.none => Pair.pair model Command.none,
+        Option.some minutes =>
+          Pair.pair model (Command.perform (Effect.update_offset minutes)),
+      },
+    Msg.offset_saved offset =>
+      Pair.pair { model with utc_offset_minutes := offset, pending := Option.none,
+        error := Option.none } Command.none,
     Msg.loaded todos =>
       let base := Spa.prune_filters
         { model with todos := todos, pending := Option.none, error := Option.none } in
       match model.pending_form {
         Option.some form => match form {
           PendingForm.pending_add =>
-            Pair.pair { base with new_title := "", pending_form := Option.none,
+            Pair.pair { base with new_title := "", new_notes := "", new_group := "",
+              new_tags := "", new_due := "", pending_form := Option.none,
               page := Tab.tasks } (Command.perform (Effect.cache todos)),
           PendingForm.pending_edit _id =>
             Pair.pair { base with edit_title := "", edit_notes := "", edit_group := "",
-              edit_tags := "", pending_form := Option.none, page := Tab.tasks }
+              edit_tags := "", edit_due := "", pending_form := Option.none,
+              page := Tab.tasks }
               (Command.perform (Effect.cache todos)),
           PendingForm.pending_subtask id =>
             Pair.pair { base with
@@ -729,9 +892,17 @@ def Spa.update (model : Model) (msg : Msg) : Pair Model (Command Effect Msg) :=
       match model.pending {
         Option.some _ => Pair.pair model Command.none,
         Option.none =>
-          Pair.pair { model with error := Option.none } (Command.perform Effect.load),
+          Pair.pair { model with error := Option.none, auth_required := false,
+            loaded := false }
+            (Command.perform
+              (if model.me_loaded then Effect.load else Effect.load_me)),
       },
   }
+
+/// A non-blank trimmed field as an `Option` (the forms use "" for absent).
+def Spa.option_text (raw : String) : Option String :=
+  let trimmed := String.trim raw in
+  if String.beq trimmed "" then Option.none else Option.some trimmed
 
 // ── effects ──────────────────────────────────────────────────────────
 
@@ -755,33 +926,61 @@ def Spa.read_all (rid : RequestId) (acc : String) : IO String := do {
   else Spa.read_all rid next
 }
 
-def Spa.resolve (rid : RequestId) : IO (Option Msg) := do {
+def Spa.me_msg (body : String) : Option Msg :=
+  match CodecWeb.me_offset_from_json body {
+    Option.some offset => Option.some (Msg.me_loaded offset),
+    Option.none => Option.none,
+  }
+
+def Spa.offset_msg (body : String) : Option Msg :=
+  match CodecWeb.me_offset_from_json body {
+    Option.some offset => Option.some (Msg.offset_saved offset),
+    Option.none => Option.none,
+  }
+
+def Spa.todos_msg (body : String) : Option Msg :=
+  match CodecWeb.todos_from_json body {
+    Option.some todos => Option.some (Msg.loaded todos),
+    Option.none => Option.none,
+  }
+
+/// The message a successful response body produces for the request kind.
+def Spa.body_msg (kind : RequestKind) (body : String) : Option Msg :=
+  match kind {
+    RequestKind.me => Spa.me_msg body,
+    RequestKind.offset => Spa.offset_msg body,
+    RequestKind.todos => Spa.todos_msg body,
+  }
+
+def Spa.resolve_response (kind : RequestKind) (rid : RequestId) : IO (Option Msg) := do {
+  let status <- Fetch.status rid;
+  let ok := Bool.not (I64.lt status 200i64) && Bool.not (I64.gt status 299i64);
+  if status == 401i64
+  then return (Option.some Msg.login_required)
+  else if Bool.not ok
+  then do {
+    let code := I64.to_string status;
+    let _ <- Console.log ("todo-spa WARN HTTP " ++ code);
+    return (Option.some (Msg.failed ("HTTP " ++ code)))
+  }
+  else do {
+    let body <- Spa.read_all rid "";
+    match Spa.body_msg kind body {
+      Option.some msg => return (Option.some msg),
+      Option.none => do {
+        let _ <- Console.log ("todo-spa WARN unparseable response: " ++ body);
+        return (Option.some (Msg.failed "unparseable response"))
+      },
+    }
+  }
+}
+
+def Spa.resolve (kind : RequestKind) (rid : RequestId) : IO (Option Msg) := do {
   let state <- Fetch.poll rid;
   if state == 0i64
   then return Option.none
   else if state == 1i64
-  then do {
-    // `fetch_poll` reports 1 for any HTTP response; check the status so a
-    // 500 from a failed save is reported as such instead of as bad JSON.
-    let status <- Fetch.status rid;
-    let ok := Bool.not (I64.lt status 200i64) && Bool.not (I64.gt status 299i64);
-    if Bool.not ok
-    then do {
-      let code := I64.to_string status;
-      let _ <- Console.log ("todo-spa WARN HTTP " ++ code);
-      return (Option.some (Msg.failed ("HTTP " ++ code)))
-    }
-    else do {
-      let body <- Spa.read_all rid "";
-      match CodecWeb.todos_from_json body {
-        Option.some todos => return (Option.some (Msg.loaded todos)),
-        Option.none => do {
-          let _ <- Console.log ("todo-spa WARN unparseable response: " ++ body);
-          return (Option.some (Msg.failed "unparseable response"))
-        },
-      }
-    }
-  }
+  then Spa.resolve_response kind rid
   else do {
     let _ <- Console.log "todo-spa WARN fetch failed";
     return (Option.some (Msg.failed "fetch failed"))
@@ -790,17 +989,31 @@ def Spa.resolve (rid : RequestId) : IO (Option Msg) := do {
 
 def Spa.run_effect (effect : Effect) : IO (Option Msg) :=
   match effect {
+    Effect.load_me => do {
+      let rid <- Fetch.begin "/api/me" 0i64 "";
+      return (Option.some (Msg.began (RequestKind.me) rid))
+    },
     Effect.load => do {
       let rid <- Fetch.begin "/api/todos" 0i64 "";
-      return (Option.some (Msg.began rid))
+      return (Option.some (Msg.began (RequestKind.todos) rid))
     },
     Effect.sync action => do {
       let rid <- Fetch.begin "/api/actions" 1i64 (Action.to_json action);
-      return (Option.some (Msg.began rid))
+      return (Option.some (Msg.began (RequestKind.todos) rid))
     },
-    Effect.check rid => Spa.resolve rid,
+    Effect.update_offset minutes => do {
+      let body := String.concat "{\"utc_offset_minutes\":"
+        (String.concat (I64.to_string minutes) "}");
+      let rid <- Fetch.begin "/api/me" 1i64 body;
+      return (Option.some (Msg.began (RequestKind.offset) rid))
+    },
+    Effect.check kind rid => Spa.resolve kind rid,
     Effect.cache todos => do {
       let _ <- Storage.set Spa.cache_key (CodecWeb.todos_to_json todos);
+      return Option.none
+    },
+    Effect.clear_cache => do {
+      let _ <- Storage.set Spa.cache_key "";
       return Option.none
     },
     Effect.save_prefs dark hide => do {
@@ -825,13 +1038,16 @@ def Spa.run_effect (effect : Effect) : IO (Option Msg) :=
 /// middle of a patch. With no outstanding request the queue stays empty,
 /// `oak_tick` is a comparison, and the heap is flat.
 def Spa.subs (m : Model) : List (Subscription Msg) :=
-  match m.pending {
-    Option.some _ => [ Subscription.animation_frame_msg Msg.poll ],
-    Option.none =>
-      if m.loaded
-      then List.empty
-      else [ Subscription.animation_frame_msg Msg.poll ],
-  }
+  if m.auth_required
+  then List.empty
+  else
+    match m.pending {
+      Option.some _ => [ Subscription.animation_frame_msg Msg.poll ],
+      Option.none =>
+        if m.me_loaded && m.loaded
+        then List.empty
+        else [ Subscription.animation_frame_msg Msg.poll ],
+    }
 
 def Spa.program (init : Model) : Program Model Msg Effect :=
   Program.with_subs init Spa.update Spa.view Spa.subs

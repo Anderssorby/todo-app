@@ -1,10 +1,11 @@
 # The pure, wasm-portable core shared by the native backend and the wasm
-# frontend: the Todo/User domain, actions, the serde-derived JSON codec,
-# and the oak view.
+# frontend: the Todo/User domain, actions, the hand-written JSON codec, the
+# time/due formatting (`stamp.mo`), the Markdown renderer (`notes.mo`), and
+# the oak view.
 #
-# Workspace-dependency note: the compiler at the pinned revision inherits
-# PATH deps via `workspace = true` but not git deps (a git-inherited dep
-# resolves to an empty lock and `unresolved module`). The git sources stay
+# Workspace-dependency note (re-tested at 6a59e090, 2026-10-30): a
+# `workspace = true` path dep no longer hangs but still does not load its
+# submodules, and an inherited git dep writes an empty lock. The sources stay
 # explicit here; the canonical copy also lives in the root
 # `[workspace.dependencies]` for the future full conversion.
 #
@@ -21,28 +22,50 @@ path = "src/lib.mo"
 
 [dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "init"
 
 [dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "std"
 
 [dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/json"
 
 [dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/oak"
 
 [dependencies.xml_html]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/xml_html"
+
+# UTC ISO-8601 parsing/calendar conversion for the shared timestamp and
+# due-date formatting. `parsec` is direct because `Stamp` matches
+# `Date.parse_iso`'s `ParseResult` (a type from that mote, so a transitive
+# dependency will not do).
+[dependencies.time]
+git = "https://github.com/monad-lang/monad.git"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+subdir = "motes/time"
+
+[dependencies.parsec]
+git = "https://github.com/monad-lang/monad.git"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+subdir = "motes/parsec"
+
+# Markdown notes, rendered with the mote's safe defaults (raw HTML escaped,
+# javascript:/vbscript:/file: URLs dropped). Pure and wasm-portable, so the
+# native SSR view and the browser shell share one renderer.
+[dependencies.markdown]
+git = "https://github.com/monad-lang/monad.git"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+subdir = "motes/markdown"
 
 [affine]
 mode = "warn"

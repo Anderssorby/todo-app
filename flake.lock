@@ -229,17 +229,17 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1793199515,
-        "narHash": "sha256-aHbmTJ7+qL+GIWSGis6c7Gg1BWBIRgE+QuCAsvNakV4=",
+        "lastModified": 1793358620,
+        "narHash": "sha256-Qm9MGTVGlkWsS5bmMtX8ed/TGUKVp73yuW0UTdEdo/A=",
         "owner": "monad-lang",
         "repo": "monad",
-        "rev": "a9d9a8115677546e41d89af923355b374817f897",
+        "rev": "6a59e0909cbc35ba1607061f7926d4347baf6f31",
         "type": "github"
       },
       "original": {
         "owner": "monad-lang",
         "repo": "monad",
-        "rev": "a9d9a8115677546e41d89af923355b374817f897",
+        "rev": "6a59e0909cbc35ba1607061f7926d4347baf6f31",
         "type": "github"
       }
     },

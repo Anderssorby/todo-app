@@ -38,7 +38,7 @@ pub def Kernel.handle (input : String) : String :=
         Option.some todos => match Kernel.action_of fields {
           Option.some action =>
             let updated := Action.apply action todos in
-            Codec.envelope_to_json updated (View.fragment_html updated),
+            Codec.envelope_to_json updated (View.fragment_html 0i64 updated),
           Option.none => Kernel.error "expected an action object",
         },
         Option.none => Kernel.error "expected a state array",

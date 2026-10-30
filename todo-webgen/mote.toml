@@ -34,17 +34,17 @@ path = "src/main.mo"
 
 [dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "init"
 
 [dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "std"
 
 [dependencies.jsgen]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/jsgen"
 
 [affine]
