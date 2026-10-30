@@ -66,9 +66,11 @@ spec:
             timeoutSeconds: 2
             failureThreshold: 3
           livenessProbe:
-            # Cheap, side-effect-free read; there is no dedicated health route.
+            # `/api/todos` is 401 in production (sign-in is deferred), so a
+            # 2xx probe must target a public route; `/login` exercises the
+            # router without touching the database.
             httpGet:
-              path: /api/todos
+              path: /login
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -76,7 +78,7 @@ spec:
             failureThreshold: 3
           startupProbe:
             httpGet:
-              path: /api/todos
+              path: /login
               port: http
             periodSeconds: 2
             timeoutSeconds: 2

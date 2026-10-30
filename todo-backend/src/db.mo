@@ -78,7 +78,62 @@ def Db.down_sql : String := String.concat_list [
 pub def Db.migration : Migration :=
   Migrations.migration 1i64 "initial_schema" Db.schema_sql (Option.some Db.down_sql)
 
-pub def Db.migrations : List Migration := List.cons Db.migration List.empty
+// Migration 1 is checksum-frozen; its unused `users.timezone` column stays in
+// place. Migration 2 adds the fixed display offset and rewrites every stored
+// timestamp from SQLite's `datetime('now')` shape (`YYYY-MM-DD HH:MM:SS`) to
+// ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`), so string comparison is chronological
+// and the shared `Stamp` parser accepts every row.
+def Db.iso_timestamp_up_sql : String := String.concat_list [
+  "UPDATE users SET created_at = substr(created_at,1,10)||'T'||substr(created_at,12,8)||'Z' ",
+    "WHERE length(created_at)=19 AND substr(created_at,11,1)=' '; ",
+  "UPDATE users SET updated_at = substr(updated_at,1,10)||'T'||substr(updated_at,12,8)||'Z' ",
+    "WHERE length(updated_at)=19 AND substr(updated_at,11,1)=' '; ",
+  "UPDATE todos SET created_at = substr(created_at,1,10)||'T'||substr(created_at,12,8)||'Z' ",
+    "WHERE length(created_at)=19 AND substr(created_at,11,1)=' '; ",
+  "UPDATE todos SET updated_at = substr(updated_at,1,10)||'T'||substr(updated_at,12,8)||'Z' ",
+    "WHERE length(updated_at)=19 AND substr(updated_at,11,1)=' '; ",
+  "UPDATE sessions SET created_at = substr(created_at,1,10)||'T'||substr(created_at,12,8)||'Z' ",
+    "WHERE length(created_at)=19 AND substr(created_at,11,1)=' '; ",
+  "UPDATE sessions SET expires_at = substr(expires_at,1,10)||'T'||substr(expires_at,12,8)||'Z' ",
+    "WHERE length(expires_at)=19 AND substr(expires_at,11,1)=' '; ",
+  "UPDATE oauth_states SET created_at = substr(created_at,1,10)||'T'||substr(created_at,12,8)||'Z' ",
+    "WHERE length(created_at)=19 AND substr(created_at,11,1)=' '; ",
+  "UPDATE oauth_states SET expires_at = substr(expires_at,1,10)||'T'||substr(expires_at,12,8)||'Z' ",
+    "WHERE length(expires_at)=19 AND substr(expires_at,11,1)=' ';"
+]
+
+def Db.migration_2_up_sql : String := String.concat_list [
+  "ALTER TABLE users ADD COLUMN utc_offset_minutes INTEGER NOT NULL DEFAULT 0 ",
+    "CHECK (utc_offset_minutes BETWEEN -720 AND 840 AND utc_offset_minutes % 15 = 0); ",
+  Db.iso_timestamp_up_sql
+]
+
+def Db.migration_2_down_sql : String := String.concat_list [
+  "UPDATE users SET created_at = substr(created_at,1,10)||' '||substr(created_at,12,8) ",
+    "WHERE length(created_at)=20 AND substr(created_at,11,1)='T' AND substr(created_at,20,1)='Z'; ",
+  "UPDATE users SET updated_at = substr(updated_at,1,10)||' '||substr(updated_at,12,8) ",
+    "WHERE length(updated_at)=20 AND substr(updated_at,11,1)='T' AND substr(updated_at,20,1)='Z'; ",
+  "UPDATE todos SET created_at = substr(created_at,1,10)||' '||substr(created_at,12,8) ",
+    "WHERE length(created_at)=20 AND substr(created_at,11,1)='T' AND substr(created_at,20,1)='Z'; ",
+  "UPDATE todos SET updated_at = substr(updated_at,1,10)||' '||substr(updated_at,12,8) ",
+    "WHERE length(updated_at)=20 AND substr(updated_at,11,1)='T' AND substr(updated_at,20,1)='Z'; ",
+  "UPDATE sessions SET created_at = substr(created_at,1,10)||' '||substr(created_at,12,8) ",
+    "WHERE length(created_at)=20 AND substr(created_at,11,1)='T' AND substr(created_at,20,1)='Z'; ",
+  "UPDATE sessions SET expires_at = substr(expires_at,1,10)||' '||substr(expires_at,12,8) ",
+    "WHERE length(expires_at)=20 AND substr(expires_at,11,1)='T' AND substr(expires_at,20,1)='Z'; ",
+  "UPDATE oauth_states SET created_at = substr(created_at,1,10)||' '||substr(created_at,12,8) ",
+    "WHERE length(created_at)=20 AND substr(created_at,11,1)='T' AND substr(created_at,20,1)='Z'; ",
+  "UPDATE oauth_states SET expires_at = substr(expires_at,1,10)||' '||substr(expires_at,12,8) ",
+    "WHERE length(expires_at)=20 AND substr(expires_at,11,1)='T' AND substr(expires_at,20,1)='Z'; ",
+  "ALTER TABLE users DROP COLUMN utc_offset_minutes;"
+]
+
+pub def Db.migration_2 : Migration :=
+  Migrations.migration 2i64 "utc_offset_minutes_and_iso_timestamps"
+    Db.migration_2_up_sql (Option.some Db.migration_2_down_sql)
+
+pub def Db.migrations : List Migration :=
+  List.cons Db.migration (List.cons Db.migration_2 List.empty)
 
 // ─── Queries ────────────────────────────────────────────────────────────
 
@@ -200,12 +255,12 @@ def Db.decode_user_row (row : Row) : Result SqlError User :=
         SqlResult.and_then (Db.optional_text row "email") (fn (email : Option String) =>
           SqlResult.and_then (Row.get_text row "name") (fn (name : String) =>
             SqlResult.and_then (Db.optional_text row "picture") (fn (picture : Option String) =>
-              SqlResult.and_then (Row.get_text row "timezone") (fn (timezone : String) =>
+              SqlResult.and_then (Row.get_i64 row "utc_offset_minutes") (fn (offset : I64) =>
                 SqlResult.and_then (Row.get_text row "created_at") (fn (created : String) =>
                   SqlResult.and_then (Row.get_text row "updated_at") (fn (updated : String) =>
                     Result.ok ({
                       id := id, issuer := issuer, subject := subject, email := email,
-                      name := name, picture := picture, timezone := timezone,
+                      name := name, picture := picture, utc_offset_minutes := offset,
                       created_at := created, updated_at := updated
                     } : User))))))))))
 
@@ -258,7 +313,8 @@ pub def Db.load_m : SqliteM (Result String (List Todo)) := do {
 }
 
 pub def Db.now_m : SqliteM (Result String String) := do {
-  let rs <- Sqlite.query "SELECT datetime('now') AS now" List.empty;
+  let rs <- Sqlite.query "SELECT strftime('%Y-%m-%dT%H:%M:%SZ','now') AS now"
+    List.empty;
   match rs.rows {
     List.empty => return (Result.err "database clock query returned no row"),
     List.cons row _ => match Row.get_text row "now" {
@@ -497,7 +553,7 @@ def Db.exec_unit (conn : SqliteConn) (sql : String) (params : List Value)
 def Db.read_user_io (conn : SqliteConn) (identity : OidcIdentity)
     : IO (Result String User) := do {
   let rs <- Sqlite.query_io conn
-    ("SELECT id, issuer, subject, email, name, picture, timezone, " ++
+    ("SELECT id, issuer, subject, email, name, picture, utc_offset_minutes, " ++
      "created_at, updated_at FROM users WHERE issuer = ? AND subject = ?")
     [Value.text identity.issuer, Value.text identity.subject];
   match rs {
@@ -516,12 +572,13 @@ pub def Db.find_or_create_user (store : Store) (identity : OidcIdentity)
     : IO (Result String User) :=
   Db.with_conn store.db_path (fn (conn : SqliteConn) => do {
     let upsert <- Sqlite.exec_io conn
-      ("INSERT INTO users (issuer, subject, email, name, picture, timezone, " ++
-       "created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'UTC', " ++
-       "datetime('now'), datetime('now')) " ++
+      ("INSERT INTO users (issuer, subject, email, name, picture, " ++
+       "created_at, updated_at) VALUES (?, ?, ?, ?, ?, " ++
+       "strftime('%Y-%m-%dT%H:%M:%SZ','now'), " ++
+       "strftime('%Y-%m-%dT%H:%M:%SZ','now')) " ++
        "ON CONFLICT(issuer, subject) DO UPDATE SET email = excluded.email, " ++
        "name = excluded.name, picture = excluded.picture, " ++
-       "updated_at = datetime('now')")
+       "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')")
       [Value.text identity.issuer, Value.text identity.subject,
        Db.opt_text_value identity.email, Value.text identity.name,
        Db.opt_text_value identity.picture];
@@ -537,10 +594,10 @@ pub def Db.find_session (store : Store) (token_hash : String)
     let rs <- Sqlite.query_io conn
       ("SELECT s.csrf_token AS csrf_token, u.id AS id, u.issuer AS issuer, " ++
        "u.subject AS subject, u.email AS email, u.name AS name, " ++
-       "u.picture AS picture, u.timezone AS timezone, " ++
+       "u.picture AS picture, u.utc_offset_minutes AS utc_offset_minutes, " ++
        "u.created_at AS created_at, u.updated_at AS updated_at " ++
        "FROM sessions s JOIN users u ON u.id = s.user_id " ++
-       "WHERE s.id = ? AND s.expires_at > datetime('now')")
+       "WHERE s.id = ? AND s.expires_at > strftime('%Y-%m-%dT%H:%M:%SZ','now')")
       [Value.text token_hash];
     match rs {
       Result.err e => return (Result.err ("session read failed: " ++ SqlError.message e)),
@@ -563,7 +620,7 @@ pub def Db.create_session (store : Store) (user_id : I64) (token_hash : String)
   Db.with_conn store.db_path (fn (conn : SqliteConn) =>
     Db.exec_unit conn
       ("INSERT INTO sessions (id, user_id, csrf_token, created_at, expires_at) " ++
-       "VALUES (?, ?, ?, datetime('now'), ?)")
+       "VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?)")
       [Value.text token_hash, Value.integer user_id, Value.text csrf,
        Value.text expires_at]
       "session insert failed")
@@ -579,7 +636,7 @@ pub def Db.put_oauth_state (store : Store) (state : OauthState)
     Db.exec_unit conn
       ("INSERT OR REPLACE INTO oauth_states " ++
        "(state, nonce, code_verifier, redirect_to, created_at, expires_at) " ++
-       "VALUES (?, ?, ?, ?, datetime('now'), ?)")
+       "VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?)")
       [Value.text state.state, Value.text state.nonce,
        Value.text state.code_verifier, Db.opt_text_value state.redirect_to,
        Value.text state.expires_at]
@@ -600,7 +657,8 @@ pub def Db.take_oauth_state (store : Store) (state : String)
     : IO (Result String (Option OauthState)) :=
   Db.with_conn store.db_path (fn (conn : SqliteConn) => do {
     let rs <- Sqlite.query_io conn
-      ("DELETE FROM oauth_states WHERE state = ? AND expires_at > datetime('now') " ++
+      ("DELETE FROM oauth_states WHERE state = ? AND expires_at > " ++
+       "strftime('%Y-%m-%dT%H:%M:%SZ','now') " ++
        "RETURNING state, nonce, code_verifier, redirect_to, expires_at")
       [Value.text state];
     match rs {
@@ -616,13 +674,16 @@ pub def Db.take_oauth_state (store : Store) (state : String)
     }
   })
 
-pub def Db.update_timezone (store : Store) (user_id : I64) (tz : String)
+/// The user's fixed display offset (minutes east of UTC). Validated by the
+/// caller (`Handlers.api_update_me`) against `Stamp.validate_offset`.
+pub def Db.update_utc_offset (store : Store) (user_id : I64) (minutes : I64)
     : IO (Result String Unit) :=
   Db.with_conn store.db_path (fn (conn : SqliteConn) =>
     Db.exec_unit conn
-      "UPDATE users SET timezone = ?, updated_at = datetime('now') WHERE id = ?"
-      [Value.text tz, Value.integer user_id]
-      "timezone update failed")
+      ("UPDATE users SET utc_offset_minutes = ?, updated_at = " ++
+       "strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?")
+      [Value.integer minutes, Value.integer user_id]
+      "utc offset update failed")
 
 // ─── Tests ──────────────────────────────────────────────────────────────
 //
@@ -634,8 +695,8 @@ pub def Db.update_timezone (store : Store) (user_id : I64) (tz : String)
 
 def Db.test_actor : User := {
   id := 1i64, issuer := "test", subject := "test", email := Option.none,
-  name := "Test User", picture := Option.none, timezone := "UTC",
-  created_at := "2026-01-01 00:00:00", updated_at := "2026-01-01 00:00:00"
+  name := "Test User", picture := Option.none, utc_offset_minutes := 0i64,
+  created_at := "2026-01-01T00:00:00Z", updated_at := "2026-01-01T00:00:00Z"
 }
 
 // The actor's `users` row must exist before a todo names it as
@@ -643,9 +704,10 @@ def Db.test_actor : User := {
 def Db.test_seed_actor (conn : SqliteConn) : IO (Result String Unit) := do {
   let _ <- SqliteM.run
     (Sqlite.exec
-      ("INSERT OR IGNORE INTO users (id, issuer, subject, name, timezone, " ++
+      ("INSERT OR IGNORE INTO users (id, issuer, subject, name, " ++
        "created_at, updated_at) VALUES (1, 'test', 'test', 'Test User', " ++
-       "'UTC', datetime('now'), datetime('now'))")
+       "strftime('%Y-%m-%dT%H:%M:%SZ','now'), " ++
+       "strftime('%Y-%m-%dT%H:%M:%SZ','now'))")
       List.empty)
     conn;
   return (Result.ok Unit.unit)
@@ -689,6 +751,10 @@ def Db.test_round_trip_ok (todos : List Todo) : Bool :=
       && (match t.group { Option.some g => g == "G", Option.none => false })
       && (match t.due_at { Option.some d => d == "2026-11-01", Option.none => false })
       && (match t.created_by { Option.some u => u.name == "Test User", Option.none => false })
+      && (match t.created_at {
+        Option.some c => String.contains c "T" && String.contains c "Z",
+        Option.none => false,
+      })
       && List.length t.tags == 2i64,
   }
 
@@ -732,7 +798,9 @@ def Db.test_after_empty (conn : SqliteConn) (r : Result String Unit)
     },
   }
 
-def Db.test_after_migrate (conn : SqliteConn) (migrated : Result SqlError Unit)
+// `Sqlite.migrate` returns the rowids of the applied migrations' statements
+// (`Result SqlError (List I64)`) at this revision; only success matters here.
+def Db.test_after_migrate (conn : SqliteConn) (migrated : Result SqlError (List I64))
     : IO (Result String Bool) :=
   match migrated {
     Result.err e => return (Result.err ("migration failed: " ++ SqlError.message e)),
@@ -741,6 +809,68 @@ def Db.test_after_migrate (conn : SqliteConn) (migrated : Result SqlError Unit)
       Db.test_after_empty conn empty;
     },
   }
+
+def Db.test_legacy_timestamps_normalized (conn : SqliteConn)
+    : IO (Result String Bool) := do {
+  let rs <- Sqlite.query_io conn
+    "SELECT created_at, utc_offset_minutes FROM users WHERE id = 1" List.empty;
+  match rs {
+    Result.err e => return (Result.err (SqlError.message e)),
+    Result.ok result_set => match result_set.rows {
+      List.empty => return (Result.err "seeded user missing after migration 2"),
+      List.cons row _ => match Row.get_text row "created_at" {
+        Result.err e => return (Result.err (SqlError.message e)),
+        Result.ok created => match Row.get_i64 row "utc_offset_minutes" {
+          Result.err e => return (Result.err (SqlError.message e)),
+          Result.ok offset =>
+            return (Result.ok (String.contains created "T"
+              && String.contains created "Z"
+              && I64.beq offset 0i64)),
+        },
+      },
+    },
+  }
+}
+
+/// Apply migration 1 only, insert a row with SQLite's old timestamp shape,
+/// then apply the full list: the row must come out ISO-8601 and the new
+/// offset column must default to UTC.
+#[test]
+def test_db_migration_2_normalizes_legacy_timestamps : IO Bool := do {
+  let result <- Db.with_conn ":memory:" (fn (conn : SqliteConn) => do {
+    let first <- Sqlite.migrate conn (List.cons Db.migration List.empty);
+    match first {
+      Result.err e => do {
+        let _ <- IO.write_stderr ("migration 1: " ++ SqlError.message e ++ "\n");
+        return (Result.err "migration 1 failed")
+      },
+      Result.ok _ => do {
+        let seeded <- Db.exec_unit conn
+          ("INSERT INTO users (id, issuer, subject, name, created_at, updated_at) " ++
+           "VALUES (1, 'i', 's', 'n', datetime('now'), datetime('now'))")
+          List.empty "legacy seed";
+        match seeded {
+          Result.err e => return (Result.err e),
+          Result.ok _ => do {
+            let second <- Sqlite.migrate conn Db.migrations;
+            match second {
+              Result.err e =>
+                return (Result.err ("migration 2: " ++ SqlError.message e)),
+              Result.ok _ => Db.test_legacy_timestamps_normalized conn,
+            }
+          },
+        }
+      },
+    }
+  });
+  match result {
+    Result.ok ok => return ok,
+    Result.err e => do {
+      let _ <- IO.write_stderr ("db migration test: " ++ e ++ "\n");
+      return false
+    },
+  }
+}
 
 #[test]
 def test_db_migrates_and_round_trips : IO Bool := do {

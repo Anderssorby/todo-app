@@ -10,6 +10,7 @@
 /// Raw form attributes (`method`, `action`, `enctype`) use oak's typed
 /// `Html.attr`; the no-JS forms are handler-free, so they lower verbatim.
 use lib::storage {Status, Storage.seed, Subtask, Todo}
+use lib::user {UserRef}
 use oak::elements {
   Html.a, Html.attr, Html.button, Html.checked, Html.class_, Html.data, Html.div, Html.document,
   Html.footer, Html.form, Html.fragment, Html.h1, Html.href, Html.input, Html.li, Html.main_,
@@ -18,6 +19,8 @@ use oak::elements {
   Html.ul, Html.value_
 }
 use oak::typed {Oak.Attr, Oak.Node, Oak.to_html}
+use lib::notes {Notes.markdown, Notes.preview}
+use lib::stamp {Stamp.created_line, Stamp.due_label, Stamp.updated_line}
 use std::list {List.filter, List.intercalate, List.length}
 use xml_html::html {Html.to_string}
 
@@ -53,8 +56,9 @@ pub def View.css : String :=
     "nav.tabs .nav-new{margin-left:auto;color:var(--accent)}",
     ".back-link{display:inline-block;margin-bottom:1rem;color:var(--muted)}",
     ".not-found{color:var(--muted)}",
-    ".add-form{display:flex;gap:.5rem;margin-bottom:1rem}",
-    ".add-form input{flex:1;padding:.5rem;border:1px solid var(--border);border-radius:.4rem;background:var(--surface);color:var(--fg)}",
+    ".add-form{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap}",
+    ".add-form input,.add-form textarea{flex:1;padding:.5rem;border:1px solid var(--border);border-radius:.4rem;background:var(--surface);color:var(--fg);font:inherit}",
+    ".add-form textarea{min-width:100%;min-height:3.5rem;resize:vertical}",
     ".add-form button,.subtask-add-form button{",
       "background:var(--accent);color:var(--accent-fg);border:none;border-radius:.4rem;padding:.5rem 1rem;cursor:pointer",
     "}",
@@ -71,7 +75,19 @@ pub def View.css : String :=
     ".todo-meta{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem}",
     ".group{background:var(--accent);color:var(--accent-fg);border-radius:.4rem;padding:.1rem .5rem;font-size:.75rem}",
     ".tag{border:1px solid var(--border);border-radius:.4rem;padding:.1rem .5rem;font-size:.75rem;color:var(--muted)}",
-    ".notes-preview{color:var(--muted);font-size:.875rem;margin:.4rem 0 0;white-space:pre-wrap}",
+    ".notes-preview{color:var(--muted);font-size:.875rem;margin:.4rem 0 0}",
+    ".notes-preview.markdown p{margin:.3rem 0}",
+    ".notes-preview.markdown ul,.notes-preview.markdown ol{margin:.3rem 0;padding-left:1.25rem}",
+    ".notes-preview.markdown code{background:var(--bg);border-radius:.25rem;padding:.05rem .25rem;font-size:.95em}",
+    ".notes-preview.markdown pre{background:var(--bg);border:1px solid var(--border);border-radius:.4rem;padding:.5rem;overflow-x:auto}",
+    ".notes-preview.markdown pre code{background:none;padding:0}",
+    ".notes-preview.markdown table{border-collapse:collapse;margin:.4rem 0}",
+    ".notes-preview.markdown th,.notes-preview.markdown td{border:1px solid var(--border);padding:.15rem .45rem;text-align:left}",
+    ".notes-preview.markdown a{color:var(--accent)}",
+    ".notes-preview.markdown img{max-width:100%}",
+    ".due{border:1px solid var(--border);border-radius:.4rem;padding:.1rem .5rem;font-size:.75rem;color:var(--fg)}",
+    ".todo-audit-lines{margin:.3rem 0 0}",
+    ".todo-audit{margin:.15rem 0 0;color:var(--muted);font-size:.75rem}",
     ".subtasks{margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem}",
     ".subtask-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.2rem}",
     ".subtask-list li{display:flex}",
@@ -161,8 +177,7 @@ pub def View.tag_chip {Msg : Type} (tag : String) : Oak.Node Msg :=
   Html.span [Html.class_ ["tag"]] [Html.text tag]
 
 def View.notes_preview (t : Todo) : Oak.Node Unit :=
-  if String.beq t.notes "" then Html.fragment List.empty
-  else Html.p [Html.class_ ["notes-preview"]] [Html.text t.notes]
+  Notes.preview t.notes
 
 def View.subtask_path (sid : I64) (op : String) : String :=
   String.concat "/subtasks/" (String.concat (I64.to_string sid) (String.concat "/" op))
@@ -215,6 +230,7 @@ def View.subtasks_block (t : Todo) : Oak.Node Unit :=
 pub def View.edit_form (t : Todo) : Oak.Node Unit :=
   let tags_str := List.intercalate ", " t.tags in
   let group_str := match t.group { Option.some g => g, Option.none => "" } in
+  let due_str := match t.due_at { Option.some d => d, Option.none => "" } in
   Html.form
     [ Html.attr "method" "post",
       Html.attr "action" (View.todo_path t "edit"),
@@ -224,17 +240,42 @@ pub def View.edit_form (t : Todo) : Oak.Node Unit :=
       Html.textarea [Html.name_ "notes", Html.placeholder "Notes"] [Html.text t.notes],
       Html.input [Html.name_ "group", Html.value_ group_str, Html.type_ "text", Html.placeholder "Group"],
       Html.input [Html.name_ "tags", Html.value_ tags_str, Html.type_ "text", Html.placeholder "Tags (comma separated)"],
+      Html.input [Html.name_ "due_at", Html.value_ due_str, Html.type_ "date"],
       Html.button [Html.type_ "submit"] [Html.text "Save"] ]
 
 def View.edit_link (t : Todo) : Oak.Node Unit :=
   Html.a [Html.href (View.todo_path t "edit")] [Html.text "Edit"]
 
-pub def View.item (t : Todo) : Oak.Node Unit :=
+def View.due_chips (offset_minutes : I64) (t : Todo) : List (Oak.Node Unit) :=
+  match Stamp.due_label offset_minutes t.due_at {
+    Option.some label =>
+      List.cons (Html.span [Html.class_ ["due"]] [Html.text label]) List.empty,
+    Option.none => List.empty,
+  }
+
+def View.audit_lines (offset_minutes : I64) (t : Todo) : List (Oak.Node Unit) :=
+  let created :=
+    match Stamp.created_line offset_minutes t {
+      Option.some line =>
+        List.cons (Html.p [Html.class_ ["todo-audit"]] [Html.text line]) List.empty,
+      Option.none => List.empty,
+    } in
+  let updated :=
+    match Stamp.updated_line offset_minutes t {
+      Option.some line =>
+        List.cons (Html.p [Html.class_ ["todo-audit"]] [Html.text line]) List.empty,
+      Option.none => List.empty,
+    } in
+  List.append created updated
+
+pub def View.item (offset_minutes : I64) (t : Todo) : Oak.Node Unit :=
   Html.li [Html.class_ (View.item_classes t)]
     [ Html.div [Html.class_ ["todo-main"]] [ View.toggle_form t, View.delete_form t, View.edit_link t ],
       Html.div [Html.class_ ["todo-meta"]]
-        (List.append (List.cons (View.group_badge t.group) List.empty) (List.map View.tag_chip t.tags)),
+        (List.append (List.cons (View.group_badge t.group) List.empty)
+          (List.append (List.map View.tag_chip t.tags) (View.due_chips offset_minutes t))),
       View.notes_preview t,
+      Html.div [Html.class_ ["todo-audit-lines"]] (View.audit_lines offset_minutes t),
       View.subtasks_block t ]
 
 /// The no-JS create form. The backend parses this as urlencoded; without
@@ -247,6 +288,10 @@ pub def View.add_form : Oak.Node Unit :=
       Html.attr "enctype" "application/x-www-form-urlencoded",
       Html.class_ ["add-form"] ]
     [ Html.input [Html.name_ "title", Html.placeholder "New todo", Html.required, Html.type_ "text"],
+      Html.textarea [Html.name_ "notes", Html.placeholder "Notes (Markdown)"] List.empty,
+      Html.input [Html.name_ "group", Html.type_ "text", Html.placeholder "Group"],
+      Html.input [Html.name_ "tags", Html.type_ "text", Html.placeholder "Tags (comma separated)"],
+      Html.input [Html.name_ "due_at", Html.type_ "date"],
       Html.button [Html.type_ "submit"] [Html.text "Add"] ]
 
 def View.count_label (todos : List Todo) : String :=
@@ -270,15 +315,16 @@ pub def View.nav : Oak.Node Unit :=
       Html.a [Html.href "/kanban"] [Html.text "Kanban"],
       Html.a [Html.href "/todos/new", Html.class_ ["nav-new"]] [Html.text "+ New"] ]
 
-pub def View.fragment (todos : List Todo) : Oak.Node Unit :=
+pub def View.fragment (offset_minutes : I64) (todos : List Todo) : Oak.Node Unit :=
   Html.div [Html.class_ ["todo-app"]]
     [ Html.h1 List.empty [Html.text "todo-app"],
       View.nav,
-      Html.ul [Html.class_ ["todos"]] (List.map View.item todos),
+      Html.ul [Html.class_ ["todos"]]
+        (List.map (fn (t : Todo) => View.item offset_minutes t) todos),
       View.footer todos ]
 
-pub def View.fragment_html (todos : List Todo) : String :=
-  Html.to_string (Oak.to_html (View.fragment todos))
+pub def View.fragment_html (offset_minutes : I64) (todos : List Todo) : String :=
+  Html.to_string (Oak.to_html (View.fragment offset_minutes todos))
 
 /// The HTML-document boilerplate shared by every page (index, kanban,
 /// new-task, edit-task): head/style/script chrome around whatever the
@@ -298,11 +344,13 @@ def View.shell (version : String) (inner : Oak.Node Unit) : Oak.Node Unit :=
 def View.back_link : Oak.Node Unit :=
   Html.a [Html.href "/", Html.class_ ["back-link"]] [Html.text "< Back to tasks"]
 
-pub def View.page (version : String) (todos : List Todo) : Oak.Node Unit :=
-  View.shell version (View.fragment todos)
+pub def View.page (version : String) (offset_minutes : I64) (todos : List Todo)
+    : Oak.Node Unit :=
+  View.shell version (View.fragment offset_minutes todos)
 
-pub def View.page_html (version : String) (todos : List Todo) : String :=
-  Html.to_string (Oak.to_html (View.page version todos))
+pub def View.page_html (version : String) (offset_minutes : I64) (todos : List Todo)
+    : String :=
+  Html.to_string (Oak.to_html (View.page version offset_minutes todos))
 
 /// The dedicated new-task page: `View.add_form` no longer renders inline
 /// above the list, only here.
@@ -395,7 +443,7 @@ def test_item_escapes_title : Bool :=
     status := Status.todo, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  let html := View.fragment_html todos in
+  let html := View.fragment_html 0i64 todos in
   String.contains html "&lt;script&gt;&amp;" && Bool.not (String.contains html "<script>&")
 
 #[test]
@@ -405,12 +453,12 @@ def test_done_item_renders_checked_and_class : Bool :=
     status := Status.done, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  let html := View.fragment_html todos in
+  let html := View.fragment_html 0i64 todos in
   String.contains html "checked" && String.contains html "class=\"todo done\""
 
 #[test]
 def test_page_loads_the_module_script : Bool :=
-  String.contains (View.page_html "testhash" Storage.seed) "/web/boot.js?v=testhash"
+  String.contains (View.page_html "testhash" 0i64 Storage.seed) "/web/boot.js?v=testhash"
 
 #[test]
 def test_item_renders_group_badge : Bool :=
@@ -419,7 +467,7 @@ def test_item_renders_group_badge : Bool :=
     status := Status.todo, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  String.contains (View.fragment_html todos) "<span class=\"group\">Work</span>"
+  String.contains (View.fragment_html 0i64 todos) "<span class=\"group\">Work</span>"
 
 #[test]
 def test_item_renders_tag_chips : Bool :=
@@ -429,7 +477,7 @@ def test_item_renders_tag_chips : Bool :=
     status := Status.todo, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  let html := View.fragment_html todos in
+  let html := View.fragment_html 0i64 todos in
   String.contains html "<span class=\"tag\">urgent</span>" && String.contains html "<span class=\"tag\">later</span>"
 
 #[test]
@@ -439,7 +487,7 @@ def test_item_renders_notes_preview_when_present : Bool :=
     status := Status.todo, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  String.contains (View.fragment_html todos) "remember this"
+  String.contains (View.fragment_html 0i64 todos) "remember this"
 
 #[test]
 def test_item_omits_notes_preview_when_empty : Bool :=
@@ -448,7 +496,7 @@ def test_item_omits_notes_preview_when_empty : Bool :=
     status := Status.todo, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  Bool.not (String.contains (View.fragment_html todos) "notes-preview")
+  Bool.not (String.contains (View.fragment_html 0i64 todos) "notes-preview")
 
 #[test]
 def test_item_renders_subtask_rows : Bool :=
@@ -458,7 +506,7 @@ def test_item_renders_subtask_rows : Bool :=
     status := Status.todo, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  let html := View.fragment_html todos in
+  let html := View.fragment_html 0i64 todos in
   String.contains html "step one" && String.contains html "action=\"/subtasks/1/toggle\""
 
 #[test]
@@ -468,16 +516,76 @@ def test_item_renders_edit_link_not_inline_form : Bool :=
     status := Status.todo, due_at := Option.none,
     created_at := Option.none, updated_at := Option.none,
     created_by := Option.none, updated_by := Option.none } : Todo) List.empty in
-  let html := View.fragment_html todos in
+  let html := View.fragment_html 0i64 todos in
   String.contains html "href=\"/todos/1/edit\"" && Bool.not (String.contains html "class=\"edit-form\"")
 
 #[test]
 def test_fragment_has_no_inline_add_form : Bool :=
-  Bool.not (String.contains (View.fragment_html Storage.seed) "class=\"add-form\"")
+  Bool.not (String.contains (View.fragment_html 0i64 Storage.seed) "class=\"add-form\"")
 
 #[test]
 def test_new_page_renders_add_form : Bool :=
   String.contains (View.new_page_html "testhash") "class=\"add-form\""
+
+#[test]
+def test_new_page_add_form_has_every_field : Bool :=
+  let html := View.new_page_html "testhash" in
+  String.contains html "name=\"notes\""
+  && String.contains html "name=\"group\""
+  && String.contains html "name=\"tags\""
+  && String.contains html "name=\"due_at\""
+
+#[test]
+def test_notes_render_markdown : Bool :=
+  let node : Oak.Node Unit := Notes.markdown "**bold** and *it*" in
+  let html := Html.to_string (Oak.to_html node) in
+  String.contains html "<strong>bold</strong>" && String.contains html "<em>it</em>"
+
+#[test]
+def test_notes_render_lists_and_code : Bool :=
+  let node : Oak.Node Unit := Notes.markdown "- a\n- b\n\n```\nlet x = 1\n```\n" in
+  let html := Html.to_string (Oak.to_html node) in
+  String.contains html "<ul>" && String.contains html "<pre><code>"
+
+/// Raw HTML is escaped by `default_html_options`, not passed through.
+#[test]
+def test_notes_escape_raw_html : Bool :=
+  let node : Oak.Node Unit := Notes.markdown "<script>alert(1)</script>" in
+  let html := Html.to_string (Oak.to_html node) in
+  String.contains html "&lt;script&gt;" && Bool.not (String.contains html "<script>")
+
+/// `safe_urls` drops a dangerous scheme but keeps the link's text.
+#[test]
+def test_notes_drop_javascript_links : Bool :=
+  let node : Oak.Node Unit := Notes.markdown "[click](javascript:alert(1))" in
+  let html := Html.to_string (Oak.to_html node) in
+  Bool.not (String.contains html "href=\"javascript:") && String.contains html "click"
+
+#[test]
+def test_empty_notes_render_no_preview : Bool :=
+  let node : Oak.Node Unit := Notes.markdown "" in
+  String.beq (Html.to_string (Oak.to_html node)) ""
+
+def View.stamped_todo : Todo :=
+  let actor : UserRef := { id := 1i64, name := "Ada" } in
+  { id := 1i64, title := "x", done := false, notes := "", tags := List.empty,
+    group := Option.none, subtasks := List.empty, status := Status.todo,
+    due_at := Option.some "2026-11-01",
+    created_at := Option.some "2026-10-30T12:00:00Z",
+    updated_at := Option.some "2026-10-30T12:00:00Z",
+    created_by := Option.some actor, updated_by := Option.some actor }
+
+#[test]
+def test_item_renders_due_and_created_line : Bool :=
+  let html := View.fragment_html 0i64 (List.cons View.stamped_todo List.empty) in
+  String.contains html ">Due 2026-11-01<"
+  && String.contains html "Created 2026-10-30 12:00 by Ada"
+  && Bool.not (String.contains html "Updated ")
+
+#[test]
+def test_item_renders_timestamps_at_the_display_offset : Bool :=
+  let html := View.fragment_html 120i64 (List.cons View.stamped_todo List.empty) in
+  String.contains html "Created 2026-10-30 14:00 by Ada"
 
 #[test]
 def test_edit_page_prefills_existing_values : Bool :=
@@ -524,5 +632,5 @@ def test_kanban_card_omits_move_buttons_at_the_ends : Bool :=
 
 #[test]
 def test_footer_renders_counts_and_clear_completed_form : Bool :=
-  let html := View.fragment_html Storage.seed in
+  let html := View.fragment_html 0i64 Storage.seed in
   String.contains html "left" && String.contains html "action=\"/todos/clear-completed\""

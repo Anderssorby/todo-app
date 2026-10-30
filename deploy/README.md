@@ -61,60 +61,64 @@ The Deployment mounts a 1Gi `ReadWriteOnce` PVC at `/state` and an
 Probes are:
 
 - readiness: `GET /web/boot.js` (loader asset present),
-- liveness/startup: `GET /api/todos` (cheap, side-effect free).
+- liveness/startup: `GET /login` (public; `/api/todos` is 401 in production
+  while sign-in is deferred, so it cannot be a 2xx probe).
 
 The app has no dedicated health endpoint and binds `0.0.0.0:8095` (IPv4 only).
 
 ## State
 
-The image contains `/app/todos.json -> /state/todos.json`; the backend always
-opens `todos.json` relative to its working directory (`/app`), so writes go to
-the volume. The entrypoint fails fast if `/state` is missing or not writable
-(including an existing `todos.json` that is not writable).
+State is a SQLite database on the volume: the entrypoint runs
+`/app/bin/todo-backend --db "${TODO_DB:-/state/todos.db}"`, so writes go to
+`/state/todos.db` plus its `-wal` and `-shm` side files. The entrypoint fails
+fast if `/state` is missing or not writable (including an existing database or
+WAL file that is not writable).
 
-- No file: the backend serves its built-in two-item seed in memory.
-- First mutation creates `/state/todos.json`.
-- A file that exists but cannot be read or parsed is a **500**, not a reset:
-  the backend refuses to overwrite it, so a torn read or a hand-broken file
-  cannot silently replace the list with the seed. Restore a backup, or
-  delete the file to start over from the seed.
+- A fresh database runs migrations 1 and 2 and starts with an **empty**
+  shared workspace (there is no seed and `todos.json` is never imported).
+- The first sign-in/mutation creates the user/todo rows; SQLite creates the
+  database file and WAL on the first write.
+- Migrations are checksum-tracked. A database whose migration 1 checksum was
+  edited is refused rather than silently rewritten.
 - Deleting the pod preserves state; deleting the PVC resets it.
 - The Deployment does not own or delete the PVC.
+- SQLite with WAL uses three files. Back up with the pod stopped (or after a
+  checkpoint) so the database and WAL are consistent.
 
 Back up the PVC before upgrades if the data matters.
 
 ## Why one replica
 
-`todo-backend` writes the whole JSON file with
-`open(O_WRONLY|O_CREAT|O_TRUNC)` -- no locking, no fsync, no temp-file rename
-(`todo-backend/src/persist.mo`), and `Server.serve_concurrent` runs up to 16
-handlers. Concurrent writes can lose updates, and a reader can observe a
-truncated file and fall back to the seed. Therefore:
+SQLite is a local file: the database and its WAL cannot be shared safely by
+two pods, even on a filesystem that pretends to support RWX. Therefore:
 
 - `replicas: 1`;
 - `strategy: Recreate` (never two pods during a rollout);
 - a `ReadWriteOnce` PVC (no RWX/multi-pod);
 - no HPA, no rolling updates, no shared state between pods.
 
-A production-grade multi-replica deployment needs a database and real
-transaction/locking semantics; that is a backend change, not a manifest
-change.
-
-Note that `replicas: 1` only rules out *cross-pod* writers. Inside the one
-pod `Server.serve_concurrent` still runs up to 16 handlers, and each mutation
-is a non-transactional `load -> apply -> save` of the whole file, so two
-mutations racing in one process can lose one update (last save wins; a read
-that lands mid-write now returns 500 instead of the seed). This is adequate
-for the single-user demo; serializing or moving state to a database is the
-fix if it matters.
+Within the one pod, `Server.serve_concurrent` runs up to 16 handlers, but
+every mutation is a single `BEGIN IMMEDIATE` transaction that loads, applies
+the shared `Action`, and rewrites the rows (`todo-backend/src/db.mo`), so
+concurrent writers serialize (bounded by the driver's 5 s busy timeout)
+instead of losing an update. A multi-replica deployment needs a client/server
+database and sessions external to the pod; that is a backend change, not a
+manifest change.
 
 ## Known SPA limits
 
 - The wasm shell has one request slot (`Model.pending`). Starting a second
   mutation before the first response arrives leaves the first response
-  unread; the server still receives both, and the file store's last-write
-  wins. Clicking a few controls quickly is fine in practice, but a queue is
-  the real fix.
+  unread; both still reach the server and are applied transactionally, but
+  the first response is dropped. Clicking a few controls quickly is fine in
+  practice, but a queue is the real fix.
+- The shell starts with `GET /api/me`: a 401 shows a sign-in view and clears
+  the cached list, so a production deployment without OAuth enabled is a
+  closed app (see below).
+- Every re-render parses Markdown for every note, and the wasm bump allocator
+  never frees. Hundreds of long notes can exhaust the browser heap; keep
+  notes/lists modest until the renderer is cached or the runtime reclaims
+  memory.
 - Deep links are server-side only: `/kanban`, `/todos/new` and
   `/todos/:id/edit` render the no-JS page, then the SPA mounts on the Tasks
   tab (the wasm runtime has no location API). The no-JS fallback works.
@@ -132,6 +136,18 @@ fix if it matters.
   uses shell builtins; coreutils is there for debugging and for the
   documented initContainer fallback (`chown`/`chmod`). Verify with
   `docker run --rm --entrypoint /bin/sh todo-app:latest -c id`.
+- **Sign-in is deferred in this build.** The pinned `oauth` mote implements
+  the authorization-code + PKCE client flow but cannot validate an ID token
+  (no JWT/JWKS/signature verification), so `/auth/login` and
+  `/auth/callback` return 503 and `GET /api/me` is 401 for every request.
+  `TODO_DEV_AUTH`/`--dev-auth` is a **local development stub**: it must never
+  be set in this manifest or the image. The production login flow and its
+  OAuth env/Secret come back when the mote can verify tokens.
+- **There are no sessions or CSRF tokens yet.** Authentication is the dev
+  stub only, so the workspace is effectively closed in production. Treat the
+  deployed app as read-only-until-configured, and do not expose the dev stub.
+- Time display is a per-user fixed UTC offset (no IANA/DST); notes are
+  Markdown rendered with escaped raw HTML and safe URL schemes.
 
 ## Logs
 

@@ -4,7 +4,8 @@
 # externs); availability is enforced per extern at codegen, same as
 # `web_wasm`/`oak_wasm` themselves, so `monad check` still runs everywhere.
 #
-# Workspace-dependency note: the pinned compiler's `workspace = true`
+# Workspace-dependency note (re-tested at 6a59e090, 2026-10-30): the pinned
+# compiler's `workspace = true`
 # inheritance does not load a dependency's submodules (`todo_core::storage`
 # is unresolved) and does not inherit git deps, so every source stays
 # explicit here. The canonical copy lives in the root
@@ -27,12 +28,12 @@ path = "src/main.mo"
 
 [dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "init"
 
 [dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "std"
 
 [dependencies.todo_core]
@@ -40,23 +41,23 @@ path = "../todo-core"
 
 [dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/oak"
 
 [dependencies.oak_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/oak_wasm"
 
 [dependencies.web_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/web_wasm"
 
 # The pure event snapshot the drop handler reads (`WebEvent.data`).
 [dependencies.web_event]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/web_event"
 
 # The typed-event ABI's C half (`web_event_*`, `dom_add_listener_global`)
@@ -65,17 +66,17 @@ subdir = "motes/web_event"
 # link at the pinned runtime instead of the toolchain's copy.
 [dependencies.runtime]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "runtime"
 
 [dependencies.xml_html]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/xml_html"
 
 [dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "a9d9a8115677546e41d89af923355b374817f897"
+rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
 subdir = "motes/json"
 
 # NOT `log` (motes/log): `Logger.log`'s `json_lines` match arm calls

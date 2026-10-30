@@ -880,6 +880,122 @@ second mutation started before the first response leaves that response
 unread; and the wasm shell always mounts on the Tasks tab, so `/kanban` and
 the other SSR URLs are not deep links when JS is enabled.
 
+## Toolchain bump: time + markdown motes, OAuth deferred (2026-10-30)
+
+The public Monad HEAD moved to `6a59e090` (nightly 2026-10-30), which is the
+first revision shipping `motes/time`, `motes/oauth` and `motes/markdown`.
+Every manifest, `flake.nix` and `flake.lock` was bumped together (the
+revision-skew guard still applies) and the four `mote.lock`s regenerated.
+
+Decisions:
+
+- **OAuth sign-in stays deferred.** The `oauth` mote at this revision is
+  Phase 0-1 (authorization-code + PKCE, discovery, token exchange/refresh).
+  It has no JWT/JWKS parser and never validates an ID token — no `iss`,
+  `aud`, `exp`, `nonce` or signature check (`crypto::Pubkey.verify` is a later
+  phase), and `OauthTokenSet.id_token` is carried as an opaque string.
+  Accepting that token would authenticate nothing, so `/auth/login` and
+  `/auth/callback` return 503 with that explanation and the gated
+  `TODO_DEV_AUTH` stub remains the only sign-in. No `oauth` dependency is
+  added to any manifest.
+- **Time is a fixed offset.** The `time` mote has ISO-8601 parsing/printing,
+  calendar conversion and a `TimeZone` class that is an empty seam for a
+  future tz-database mote; there is no IANA or DST support. `users.timezone`
+  (an unused IANA string) is replaced in the domain by
+  `utc_offset_minutes` and migration 2 adds the column with a
+  `-720..840`/multiple-of-15 check. `Instant.now` is **not** used as a wall
+  clock: on compiled native binaries it is `CLOCK_MONOTONIC`, so SQLite
+  `strftime('%Y-%m-%dT%H:%M:%SZ','now')` supplies "now".
+- **Markdown renders with the mote's safe defaults.** `todo-core/src/view.mo`
+  gained `View.markdown_notes`, shared by the SSR item and the SPA;
+  `default_html_options` escapes raw HTML and drops
+  `javascript:`/`vbscript:`/`file:` URLs. The one caveat is that
+  `data:image/` — including SVG — passes the URL filter; it is rendered as an
+  `<img src>`, which browsers do not script.
+
+Changes:
+
+- Migration 2 (`utc_offset_minutes_and_iso_timestamps`) adds
+  `users.utc_offset_minutes` and rewrites every stored timestamp from SQLite's
+  `YYYY-MM-DD HH:MM:SS` to ISO-8601 `...Z`, so lexicographic comparison and
+  the shared parser agree. Migration 1 is untouched (checksums are frozen).
+  All `datetime('now')` call sites (user upsert, sessions, OAuth state,
+  `Db.now_m`) use the ISO `strftime`, and `Db.update_utc_offset` replaces the
+  unused `update_timezone`.
+- `todo-core/src/stamp.mo` formats created/updated timestamps and due dates at
+  the user's offset, validates `YYYY-MM-DD` (`Date.parse_iso`, full
+  consumption) and builds the offset labels/choices. `Action.validate_due` /
+  `Action.due_valid` reject a malformed due date at every HTTP/form boundary
+  (400) instead of storing it.
+- The SPA now starts with `GET /api/me`: a 401 renders a login view and clears
+  the cache; otherwise it stores the offset, loads `/api/todos`, renders
+  Markdown notes, due chips and audit lines, and posts the Settings offset to
+  `POST /api/me {"utc_offset_minutes":n}`. The add form carries
+  notes/group/tags/due and the edit form carries due as well.
+- `web/smoke.mjs` stubs `/api/me` (recording the offset POST), renders seeded
+  audit/Markdown fields, checks the shifted timestamps, and has a
+  `SMOKE_UNAUTH=1` mode for the 401 login view.
+
+Two compiler defects found while integrating the motes:
+
+- `serde-derived-module-ooms-the-test-checker` (found 2026-10-30 at
+  `6a59e090`): `monad test todo-core/src/codec.mo` (and any test binary
+  importing a serde-derived module, e.g. `kernel.mo`) grows to ≈18 GB and is
+  OOM-killed; `monad check` of the same files and `monad build todo-backend`
+  both succeed (the build took 242 s). A minimal one-DTO spike test compiles.
+  Workaround for this app: drop the derive DTOs and use the hand-written
+  wasm-safe codec for the native backend too (`codec.mo` now delegates to
+  `codec_web.mo`). This removed ~8k affine warnings, cut the core check from
+  ~68 s (codec alone) to seconds, and made `monad test todo-core/src` pass
+  75/75.
+- `markdown-in-view-mislowers-oak-render` (found 2026-10-30 at `6a59e090`):
+  defining `View.markdown_notes` in `todo-core/src/view.mo` and calling it
+  from `View.notes_preview` made `View.fragment_html`/`View.page_html`
+  segfault at runtime even when the note was empty (the untaken markdown
+  branch still corrupted the emitted code). Moving the renderer to
+  `todo-core/src/notes.mo` (`Notes.markdown`/`Notes.preview`) fixes it;
+  fragment and page spikes then rendered (1222 B / 8395 B) and the view suite
+  passed 24/24. `markdown` itself is fine: a standalone `monad run` spike
+  rendered `<p><strong>bold</strong></p>`.
+
+Re-tested gaps:
+
+- `2026-10-23-todo-core-view-page-html-tag-corruption-segfault` **no longer
+  reproduces** at `6a59e090`: `View.page_html` renders (the spike above) and
+  `view.mo`'s `test_page_loads_the_module_script` passes in the 24/24 run.
+- The old serde derive-reflection failure in the SPA graph is moot for this
+  app (serde is gone). The `time` mote's `#[derive BEq BOrd]` types do compile
+  and run in the wasm SPA, so std's structural derives are fine at this pin.
+- `workspace = true` **was re-tested at `6a59e090`** in a throwaway copy of
+  the repo. A path dependency no longer makes `monad check` hang (the old
+  failure), but the consumer still cannot load its submodules: with
+  `[dependencies.todo_core] workspace = true` the SPA check reports `Todo`,
+  `Status` and `Stamp.*` as unknown, so the root is resolved and the modules
+  are not. A git dependency is inherited even less: `monad fetch`/`monad
+  update` write an **empty** `mote.lock` (0 entries), and the subsequent
+  workspace check then fails 226 errors. Full inheritance remains unusable;
+  the members keep explicit path/git sources.
+
+Gaps recorded:
+
+- `oauth-mote-present-but-no-id-token-validation` — available at
+  `6a59e090`, unusable for production sign-in until the JWT/JWKS and
+  `Pubkey.verify` phases land.
+- `spa-markdown-preview-memory-cost` — the SPA renders Markdown for every
+  note on every full re-render, and the wasm bump allocator never frees. A
+  smoke run with 700 notes of 200 characters exhausted the heap and crashed
+  in oak's lowering (`null function or function signature mismatch`); the
+  64 KiB response test now pads titles instead. Keep note lists small until
+  the renderer is cached or the runtime reclaims memory.
+- `time-mote-instant-now-monotonic-native` — `Instant.now` returns a
+  `CLOCK_MONOTONIC` value on compiled POSIX/WASI binaries, not a Unix
+  timestamp; the mote has no native wall-clock source.
+- `time-mote-no-iana-timezones` — fixed offsets only; the `TimeZone` class has
+  no implementation or tz database.
+- `markdown-safe-urls-allows-data-image-svg` — the URL filter permits
+  `data:image/` (including SVG); inert as an `<img>`, but a sanitiser is
+  required before allowing raw HTML.
+
 ## Gap-Logging Workflow (continuous, not deferred)
 
 After every `monad check`/`build`/`test`, wasm build/run, and curl check:

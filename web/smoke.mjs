@@ -137,12 +137,28 @@ globalThis.localStorage = {
 // ── stub backend ───────────────────────────────────────────────────────
 // GET /api/todos and POST /api/actions both return the full list, matching
 // handlers.mo. The action shapes are `Action.to_json`'s.
+const AUDIT = {
+  created_at: "2026-10-30T10:00:00Z",
+  updated_at: "2026-10-30T10:00:00Z",
+  created_by: { id: 1, name: "Dev User" },
+  updated_by: { id: 1, name: "Dev User" },
+};
 let serverTodos = [
-  { id: 1, title: "Learn Monad", done: false, notes: "", tags: [], group: null, status: "todo",
+  { id: 1, title: "Learn Monad", done: false, notes: "**read the docs**", tags: [],
+    group: null, status: "todo", due_at: "2026-11-01", ...AUDIT,
     subtasks: [{ id: 1, title: "read the docs", done: false }] },
-  { id: 2, title: "Build a todo app", done: false, notes: "", tags: ["urgent"], group: "Work",
-    status: "todo", subtasks: [] },
+  { id: 2, title: "Build a todo app", done: false, notes: "", tags: ["urgent"],
+    group: "Work", status: "todo", due_at: null, ...AUDIT,
+    updated_at: "2026-10-30T12:00:00Z",
+    subtasks: [] },
 ];
+
+// The `/api/me` profile. Changing the offset posts here, like handlers.mo.
+const UNAUTH = process.env.SMOKE_UNAUTH === "1";
+let serverUser = {
+  id: 1, issuer: "dev", subject: "dev", email: null, name: "Dev User", picture: null,
+  utc_offset_minutes: 0, created_at: AUDIT.created_at, updated_at: AUDIT.updated_at,
+};
 
 function maxId() {
   return serverTodos.reduce((m, t) => Math.max(m, t.id), 0);
@@ -157,8 +173,10 @@ function applyAction(action) {
   switch (action.type) {
     case "add": {
       serverTodos.push({
-        id: maxId() + 1, title: action.title, done: false, notes: "",
-        tags: [], group: null, status: "todo", subtasks: [],
+        id: maxId() + 1, title: action.title, done: false,
+        notes: action.notes ?? "", tags: action.tags ?? [],
+        group: action.group ?? null, status: "todo", due_at: action.due_at ?? null,
+        ...AUDIT, subtasks: [],
       });
       return;
     }
@@ -175,7 +193,8 @@ function applyAction(action) {
     case "edit":
       serverTodos = serverTodos.map((t) => t.id === action.id
         ? { ...t, title: action.title, notes: action.notes,
-            group: action.group ?? null, tags: action.tags ?? [] }
+            group: action.group ?? null, tags: action.tags ?? [],
+            due_at: action.due_at ?? null }
         : t);
       return;
     case "add_subtask": {
@@ -209,18 +228,32 @@ function applyAction(action) {
   }
 }
 
-let forcedStatus = 0;
-globalThis.fetch = async (url, options = {}) => {
-  if (url === "/api/actions") {
-    applyAction(JSON.parse(options.body || "{}"));
-  }
-  const text = JSON.stringify(serverTodos);
-  const status = forcedStatus || 200;
+function respond(status, text) {
   return {
     ok: status >= 200 && status < 300,
     status,
     arrayBuffer: async () => new TextEncoder().encode(text).buffer,
   };
+}
+
+let forcedStatus = 0;
+globalThis.fetch = async (url, options = {}) => {
+  if (UNAUTH) return respond(401, JSON.stringify({ error: "unauthorized" }));
+  if (url === "/api/me") {
+    if (options.method === "POST") {
+      const body = JSON.parse(options.body || "{}");
+      if (typeof body.utc_offset_minutes !== "number") {
+        return respond(400, JSON.stringify({ error: "bad offset" }));
+      }
+      serverUser = { ...serverUser, utc_offset_minutes: body.utc_offset_minutes };
+    }
+    return respond(200, JSON.stringify({ csrf: "dev-csrf", user: serverUser }));
+  }
+  if (url === "/api/actions") {
+    applyAction(JSON.parse(options.body || "{}"));
+  }
+  const status = forcedStatus || 200;
+  return respond(status, JSON.stringify(serverTodos));
 };
 
 // ── frame loop ─────────────────────────────────────────────────────────
@@ -269,6 +302,13 @@ function todoList() {
 
 function buttonByText(text) {
   return byTag("BUTTON").find((b) => b.textContent === text) || null;
+}
+
+function clickFirstTodoTitle() {
+  const li = todoList()[0];
+  const btn = li ? walk(li).find((n) => hasClass(n, "title")) : null;
+  if (!btn) fail("no todo title button to click");
+  click(btn);
 }
 
 function deleteButtonFor(li) {
@@ -331,9 +371,36 @@ if (!injectedStyle.textContent.includes("--accent")) fail("the injected <style> 
 console.log("ok: View.css is injected into <head> on mount");
 
 await settle(instance, 10);
+
+if (UNAUTH) {
+  // A 401 from /api/me must stop the pump and show the sign-in view without
+  // ever requesting the todo list.
+  if (!byClass("login-view").length) fail("a 401 did not render the login view");
+  if (todoList().length !== 0) fail("the login view rendered todos");
+  console.log("ok: 401 from /api/me shows the login view and no todos");
+  process.exit(0);
+}
+
 if (todoList().length !== 2) fail(`expected 2 todos after the initial load, got ${todoList().length}`);
 if (byTag("FORM").length !== 0) fail("the SPA rendered a <form> on the tasks page");
 console.log("ok: initial load rendered 2 todos (animation-frame subscription)");
+
+const strong = walk(app).find((n) => n.tagName === "STRONG");
+if (!strong || strong.textContent !== "read the docs") {
+  fail("the Markdown notes were not rendered as <strong>read the docs</strong>");
+}
+const due = byClass("due")[0];
+if (!due || due.textContent !== "Due 2026-11-01") {
+  fail(`the due date chip is wrong: ${due ? due.textContent : "missing"}`);
+}
+const audit = byClass("todo-audit").map((n) => n.textContent);
+if (!audit.some((text) => text === "Created 2026-10-30 10:00 by Dev User")) {
+  fail(`missing the created-by audit line: ${JSON.stringify(audit)}`);
+}
+if (!audit.some((text) => text === "Updated 2026-10-30 12:00 by Dev User")) {
+  fail(`missing the updated-by audit line: ${JSON.stringify(audit)}`);
+}
+console.log("ok: Markdown notes, due chip and audit lines render");
 
 const toggleBtn = buttonByText("Learn Monad");
 if (!toggleBtn) fail('could not find the "Learn Monad" toggle button');
@@ -366,6 +433,26 @@ click(settingRowButton("Hide completed")); // toggle back off so the rest of the
 click(buttonByText("Tasks"));
 await settle(instance, 2);
 if (todoList().length !== 2) fail("un-hiding completed did not restore the full list");
+
+// Timezone: the settings select posts /api/me; the response's offset is
+// stored and the rendered timestamps shift by it.
+click(buttonByText("Settings"));
+await settle(instance, 2);
+const tzSelect = byTag("SELECT")[0];
+if (!tzSelect) fail("the settings tab did not render the timezone select");
+tzSelect.value = "120";
+tzSelect.fire("change", domEvent("change", tzSelect));
+await settle(instance, 10);
+if (serverUser.utc_offset_minutes !== 120) {
+  fail(`the offset change did not reach the stub server: ${serverUser.utc_offset_minutes}`);
+}
+click(buttonByText("Tasks"));
+await settle(instance, 2);
+const shifted = byClass("todo-audit").map((n) => n.textContent);
+if (!shifted.some((text) => text === "Created 2026-10-30 12:00 by Dev User")) {
+  fail(`the +02:00 offset did not shift the audit line: ${JSON.stringify(shifted)}`);
+}
+console.log("ok: the timezone select posts the offset and timestamps shift");
 
 // Subtask toggle/delete: pure typed click handlers.
 const subtaskToggleBtn = buttonByText("read the docs");
@@ -577,9 +664,9 @@ serverTodos = [];
 for (let i = 1; i <= 700; i++) {
   serverTodos.push({
     id: i,
-    title: `big ${i}`,
+    title: `big ${i} ${"x".repeat(200)}`,
     done: false,
-    notes: "x".repeat(200),
+    notes: "",
     tags: [],
     group: null,
     subtasks: [],
@@ -607,7 +694,7 @@ console.log(`ok: a ${bigResponses}-byte response is read in full (no 64 KiB trun
 // recoverable: the frame pump stops after the failure, so without the
 // banner + Retry the page would never load again.
 forcedStatus = 500;
-click(buttonByText("big 1"));
+clickFirstTodoTitle();
 await settle(instance, 10);
 const banner = byClass("error-banner")[0];
 if (!banner) fail("the failure did not render an error banner");
@@ -639,7 +726,7 @@ serverTodos = [
   { id: 1, title: "solo", done: false, notes: "", tags: [], group: "Solo", subtasks: [], status: "todo" },
   { id: 2, title: "kept", done: false, notes: "", tags: [], group: null, subtasks: [], status: "todo" },
 ];
-click(buttonByText("big 1")); // any mutation returns the new authoritative list
+clickFirstTodoTitle(); // any mutation returns the new authoritative list
 await settle(instance, 10);
 if (todoList().length !== 2) fail(`expected the new 2-item list, got ${todoList().length}`);
 const soloChip = buttonByText("Solo");

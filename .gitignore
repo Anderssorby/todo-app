@@ -10,6 +10,9 @@ devenv.local.yaml
 
 # Runtime state (file-backed persistence, see src/persist.mo)
 todos.json
+todos.db
+todos.db-wal
+todos.db-shm
 
 # Build artifact for the wasm shell (see PLAN.md M9/M10)
 /web/app.wasm

@@ -1,169 +1,35 @@
 /// The shared JSON codec.
 ///
-/// Struct-shaped data (`Todo`, `Subtask`, `User`, `UserRef`, the response
-/// envelope) is encoded/decoded through `motes/serde`'s derive macros:
-/// `derive_json_serialize!`/`derive_json_deserialize!` generate
-/// `Type.serialize_json`/`Type.deserialize_json` for single-constructor
-/// structs. The multi-constructor domain types (`Status`, `Action`) keep
-/// their small hand-written tagged codecs, which serde's derive explicitly
-/// does not build (one match arm per constructor is unsupported there).
+/// This module used to build/read the wire shape through `motes/serde`'s
+/// derive macros. At the pinned Monad revision (`6a59e090`) the checker
+/// exhausts memory (≈18 GB) when a test binary includes a serde-derived
+/// module, so the derive path is gone: `codec_web.mo`'s hand-written encoder —
+/// already the wasm-safe implementation — is the single codec, and the
+/// native backend delegates to it. That also removes the old wasm-derive gap
+/// and several thousand affine warnings from every build.
 ///
-/// `Json.to_string` is not used: its number arm reaches the web-gated
-/// `F64.to_string`. `Codec.json_to_string` is a small generic printer that
-/// handles the integer-only `Json` values this app produces (the parser
-/// only ever yields `Json.Number.int`), so the SPA's wasm build stays
-/// valid. Parsing uses the web-safe `Json.parse` + derived decoders.
+/// `Json.to_string` is still not used: its number arm reaches the web-gated
+/// `F64.to_string`. `Codec.json_to_string` prints the integer-only `Json`
+/// values this app produces, so the same code is valid on wasm.
+use lib::codec_web {
+  CodecWeb.todo_from_json, CodecWeb.todo_to_json, CodecWeb.todos_from_json,
+  CodecWeb.todos_from_json_values, CodecWeb.todos_to_json
+}
 use lib::storage {
   Status, Storage.add_subtask, Storage.edit, Storage.seed, Storage.set_status,
   Subtask, Todo
 }
 use lib::user {User, UserRef}
 use json::json {Json}
-use json::serde_backend {derive_json_deserialize, derive_json_serialize}
 use lib::json_text {
   JsonText.escape_char, JsonText.escape_json_string, JsonText.group_to_json,
   JsonText.json_string, JsonText.json_to_string, JsonText.option_string_to_json,
   JsonText.status_to_json, JsonText.tags_to_json
 }
-use std::list {List.filter, List.filter_map, List.length}
+use std::map {BTreeMap}
+use std::list {List.filter, List.length}
 
-// ─── Derived wire structs ───────────────────────────────────────────────
-//
-// These mirror the domain types with a string `status` (an enum cannot be
-// derived) and are the only types the derive macros see. The mapping to
-// the domain lives below.
-//
-// Field defaults keep the legacy decoder's tolerance: an old
-// `id`/`title`/`done`-only document still decodes with empty notes/tags,
-// no group/subtasks/audit, and a status inferred from `done`.
-
-pub struct SubtaskDto {
-  id : I64,
-  title : String,
-  done : Bool
-}
-
-derive_json_serialize! SubtaskDto
-derive_json_deserialize! SubtaskDto
-
-pub struct UserRefDto {
-  id : I64,
-  name : String
-}
-
-derive_json_serialize! UserRefDto
-derive_json_deserialize! UserRefDto
-
-pub struct TodoDto {
-  id : I64,
-  title : String,
-  done : Bool,
-  notes : String := "",
-  tags : List String := List.empty,
-  group : Option String := Option.none,
-  subtasks : List SubtaskDto := List.empty,
-  status : String := "",
-  due_at : Option String := Option.none,
-  created_at : Option String := Option.none,
-  updated_at : Option String := Option.none,
-  created_by : Option UserRefDto := Option.none,
-  updated_by : Option UserRefDto := Option.none
-}
-
-derive_json_serialize! TodoDto
-derive_json_deserialize! TodoDto
-
-pub struct UserDto {
-  id : I64,
-  issuer : String := "",
-  subject : String := "",
-  email : Option String := Option.none,
-  name : String := "",
-  picture : Option String := Option.none,
-  timezone : String := "UTC",
-  created_at : String := "",
-  updated_at : String := ""
-}
-
-derive_json_serialize! UserDto
-derive_json_deserialize! UserDto
-
-pub struct EnvelopeDto {
-  state : List TodoDto,
-  html : String
-}
-
-derive_json_serialize! EnvelopeDto
-derive_json_deserialize! EnvelopeDto
-
-// ─── Domain <-> wire mapping ────────────────────────────────────────────
-
-def Codec.subtask_to_dto (s : Subtask) : SubtaskDto :=
-  let d : SubtaskDto := { id := s.id, title := s.title, done := s.done } in d
-
-def Codec.subtask_from_dto (d : SubtaskDto) : Subtask :=
-  let s : Subtask := { id := d.id, title := d.title, done := d.done } in s
-
-def Codec.user_ref_to_dto (u : UserRef) : UserRefDto :=
-  let d : UserRefDto := { id := u.id, name := u.name } in d
-
-def Codec.user_ref_from_dto (d : UserRefDto) : UserRef :=
-  let u : UserRef := { id := d.id, name := d.name } in u
-
-def Codec.option_user_ref_to_dto (u : Option UserRef) : Option UserRefDto :=
-  match u {
-    Option.some r => Option.some (Codec.user_ref_to_dto r),
-    Option.none => Option.none,
-  }
-
-def Codec.option_user_ref_from_dto (d : Option UserRefDto) : Option UserRef :=
-  match d {
-    Option.some r => Option.some (Codec.user_ref_from_dto r),
-    Option.none => Option.none,
-  }
-
-def Codec.todo_to_dto (t : Todo) : TodoDto :=
-  let d : TodoDto := {
-    id := t.id, title := t.title, done := t.done, notes := t.notes,
-    tags := t.tags, group := t.group,
-    subtasks := List.map Codec.subtask_to_dto t.subtasks,
-    status := Status.to_string t.status, due_at := t.due_at,
-    created_at := t.created_at, updated_at := t.updated_at,
-    created_by := Codec.option_user_ref_to_dto t.created_by,
-    updated_by := Codec.option_user_ref_to_dto t.updated_by
-  } in d
-
-def Codec.todo_from_dto (d : TodoDto) : Todo :=
-  let status : Status :=
-    match Status.from_string d.status {
-      Option.some s => s,
-      Option.none => if d.done then Status.done else Status.todo,
-    } in
-  let t : Todo := {
-    id := d.id, title := d.title, done := d.done, notes := d.notes,
-    tags := d.tags, group := d.group,
-    subtasks := List.map Codec.subtask_from_dto d.subtasks,
-    status := status, due_at := d.due_at,
-    created_at := d.created_at, updated_at := d.updated_at,
-    created_by := Codec.option_user_ref_from_dto d.created_by,
-    updated_by := Codec.option_user_ref_from_dto d.updated_by
-  } in t
-
-def Codec.user_to_dto (u : User) : UserDto :=
-  let d : UserDto := {
-    id := u.id, issuer := u.issuer, subject := u.subject, email := u.email,
-    name := u.name, picture := u.picture, timezone := u.timezone,
-    created_at := u.created_at, updated_at := u.updated_at
-  } in d
-
-def Codec.user_from_dto (d : UserDto) : User :=
-  let u : User := {
-    id := d.id, issuer := d.issuer, subject := d.subject, email := d.email,
-    name := d.name, picture := d.picture, timezone := d.timezone,
-    created_at := d.created_at, updated_at := d.updated_at
-  } in u
-
-// ─── Text helpers (shared with the wasm-safe codec) ───────────────────
+// ─── Text helpers ───────────────────────────────────────────────────────
 //
 // The implementation lives in `json_text.mo`, which has no derive/macro
 // dependency. These wrappers keep the public `Codec.*` names the backend
@@ -190,59 +56,84 @@ pub def Codec.status_to_json (s : Status) : String :=
 pub def Codec.tags_to_json (tags : List String) : String :=
   JsonText.tags_to_json tags
 
-// ─── Subtask / todo / envelope ──────────────────────────────────────────
+// ─── Subtask / todo ─────────────────────────────────────────────────────
 
 pub def Codec.subtask_to_json (s : Subtask) : String :=
-  Codec.json_to_string (SubtaskDto.serialize_json (Codec.subtask_to_dto s))
+  Codec.json_to_string (Json.make_object_pairs [
+    Pair.pair "id" (Json.make_num_int s.id),
+    Pair.pair "title" (Json.make_str s.title),
+    Pair.pair "done" (Json.make_bool s.done)
+  ])
 
 pub def Codec.subtasks_to_json (subs : List Subtask) : String :=
   Codec.json_to_string
     (Json.make_array
-      (List.map (fn (s : Subtask) => SubtaskDto.serialize_json (Codec.subtask_to_dto s)) subs))
+      (List.map (fn (s : Subtask) => Json.make_object_pairs [
+        Pair.pair "id" (Json.make_num_int s.id),
+        Pair.pair "title" (Json.make_str s.title),
+        Pair.pair "done" (Json.make_bool s.done)
+      ]) subs))
 
 pub def Codec.todo_to_json (t : Todo) : String :=
-  Codec.json_to_string (TodoDto.serialize_json (Codec.todo_to_dto t))
+  Codec.json_to_string (CodecWeb.todo_to_json t)
 
 pub def Codec.todos_to_json (todos : List Todo) : String :=
-  Codec.json_to_string
-    (Json.make_array
-      (List.map (fn (t : Todo) => TodoDto.serialize_json (Codec.todo_to_dto t)) todos))
+  CodecWeb.todos_to_json todos
 
 pub def Codec.todos_from_json_values (items : List Json) : List Todo :=
-  List.filter_map
-    (fn (item : Json) =>
-      match TodoDto.deserialize_json item {
-        Result.ok dto => Option.some (Codec.todo_from_dto dto),
-        Result.err _ => Option.none,
-      })
-    items
+  CodecWeb.todos_from_json_values items
 
 pub def Codec.todo_from_json (j : Json) : Option Todo :=
-  match TodoDto.deserialize_json j {
-    Result.ok dto => Option.some (Codec.todo_from_dto dto),
-    Result.err _ => Option.none,
-  }
+  CodecWeb.todo_from_json j
 
 pub def Codec.todos_from_json (text : String) : Option (List Todo) :=
+  CodecWeb.todos_from_json text
+
+/// `{"state":[…],"html":"…"}` — the kernel's response envelope.
+pub def Codec.envelope_to_json (todos : List Todo) (html : String) : String :=
+  String.concat "{\"state\":"
+    (String.concat (Codec.todos_to_json todos)
+      (String.concat ",\"html\":" (String.concat (Codec.json_string html) "}")))
+
+pub def Codec.envelope_from_json (text : String)
+    : Option (Pair (List Todo) String) :=
   match Json.parse text {
-    ok j => match Json.get_array j {
-      ok items => Option.some (Codec.todos_from_json_values items),
+    ok j => match Json.get_object j {
+      ok fields => match Json.object_get "state" fields {
+        Option.some state => match Json.get_array state {
+          ok items => match Json.object_get "html" fields {
+            Option.some h => match Json.get_str h {
+              ok html => Option.some
+                (Pair.pair (CodecWeb.todos_from_json_values items) html),
+              err _ => Option.none,
+            },
+            Option.none => Option.none,
+          },
+          err _ => Option.none,
+        },
+        Option.none => Option.none,
+      },
       err _ => Option.none,
     },
     err _ => Option.none,
   }
 
-pub def Codec.envelope_to_json (todos : List Todo) (html : String) : String :=
-  let dto : EnvelopeDto := {
-    state := List.map Codec.todo_to_dto todos,
-    html := html
-  } in
-  Codec.json_to_string (EnvelopeDto.serialize_json dto)
-
 // ─── User / attribution ─────────────────────────────────────────────────
 
+def Codec.option_string_value (o : Option String) : Json :=
+  match o {
+    Option.some s => Json.make_str s,
+    Option.none => Json.make_null,
+  }
+
+def Codec.user_ref_value (u : UserRef) : Json :=
+  Json.make_object_pairs [
+    Pair.pair "id" (Json.make_num_int u.id),
+    Pair.pair "name" (Json.make_str u.name)
+  ]
+
 pub def Codec.user_ref_to_json (u : UserRef) : String :=
-  Codec.json_to_string (UserRefDto.serialize_json (Codec.user_ref_to_dto u))
+  Codec.json_to_string (Codec.user_ref_value u)
 
 pub def Codec.user_ref_option_to_json (u : Option UserRef) : String :=
   match u {
@@ -251,18 +142,71 @@ pub def Codec.user_ref_option_to_json (u : Option UserRef) : String :=
   }
 
 pub def Codec.user_ref_from_json (j : Json) : Option UserRef :=
-  match UserRefDto.deserialize_json j {
-    Result.ok dto => Option.some (Codec.user_ref_from_dto dto),
-    Result.err _ => Option.none,
+  match Json.get_object j {
+    ok fields => match Json.object_get "id" fields {
+      Option.some id_j => match Json.get_num_i64 (Json.get_num id_j) {
+        ok id => match Json.object_get "name" fields {
+          Option.some name_j => match Json.get_str name_j {
+            ok name => Option.some ({ id := id, name := name } : UserRef),
+            err _ => Option.none,
+          },
+          Option.none => Option.none,
+        },
+        err _ => Option.none,
+      },
+      Option.none => Option.none,
+    },
+    err _ => Option.none,
   }
 
 pub def Codec.user_to_json (u : User) : String :=
-  Codec.json_to_string (UserDto.serialize_json (Codec.user_to_dto u))
+  Codec.json_to_string (Json.make_object_pairs [
+    Pair.pair "id" (Json.make_num_int u.id),
+    Pair.pair "issuer" (Json.make_str u.issuer),
+    Pair.pair "subject" (Json.make_str u.subject),
+    Pair.pair "email" (Codec.option_string_value u.email),
+    Pair.pair "name" (Json.make_str u.name),
+    Pair.pair "picture" (Codec.option_string_value u.picture),
+    Pair.pair "utc_offset_minutes" (Json.make_num_int u.utc_offset_minutes),
+    Pair.pair "created_at" (Json.make_str u.created_at),
+    Pair.pair "updated_at" (Json.make_str u.updated_at)
+  ])
 
+def Codec.string_field (name : String) (fields : BTreeMap String Json) : String :=
+  match Json.object_get name fields {
+    Option.some j => match Json.get_str j { ok s => s, err _ => "" },
+    Option.none => "",
+  }
+
+def Codec.int_field (name : String) (fields : BTreeMap String Json) : I64 :=
+  match Json.object_get name fields {
+    Option.some j => match Json.get_num_i64 (Json.get_num j) { ok n => n, err _ => 0i64 },
+    Option.none => 0i64,
+  }
+
+def Codec.optional_string_field (name : String) (fields : BTreeMap String Json)
+    : Option String :=
+  match Json.object_get name fields {
+    Option.some j => match Json.get_str j { ok s => Option.some s, err _ => Option.none },
+    Option.none => Option.none,
+  }
+
+/// Missing fields default exactly as the old DTO did, so a payload from an
+/// older client (or the pre-offset backend) still decodes.
 pub def Codec.user_from_json (j : Json) : Option User :=
-  match UserDto.deserialize_json j {
-    Result.ok dto => Option.some (Codec.user_from_dto dto),
-    Result.err _ => Option.none,
+  match Json.get_object j {
+    ok fields => Option.some ({
+      id := Codec.int_field "id" fields,
+      issuer := Codec.string_field "issuer" fields,
+      subject := Codec.string_field "subject" fields,
+      email := Codec.optional_string_field "email" fields,
+      name := Codec.string_field "name" fields,
+      picture := Codec.optional_string_field "picture" fields,
+      utc_offset_minutes := Codec.int_field "utc_offset_minutes" fields,
+      created_at := Codec.string_field "created_at" fields,
+      updated_at := Codec.string_field "updated_at" fields
+    } : User),
+    err _ => Option.none,
   }
 
 // ─── Tests ──────────────────────────────────────────────────────────────
@@ -361,19 +305,42 @@ def test_envelope_round_trips_html : Bool :=
   }
 
 #[test]
+def test_envelope_round_trips_state_and_html : Bool :=
+  match Codec.envelope_from_json (Codec.envelope_to_json Storage.seed "<p>x</p>") {
+    Option.some pair => match pair {
+      Pair.pair todos html => List.length todos == 2i64 && String.beq html "<p>x</p>",
+    },
+    Option.none => false,
+  }
+
+#[test]
 def test_user_round_trips_through_json : Bool :=
   let u : User := {
     id := 7i64, issuer := "https://idp.example", subject := "abc",
     email := Option.some "a@example.com", name := "Ada",
-    picture := Option.none, timezone := "Europe/Oslo",
+    picture := Option.none, utc_offset_minutes := 120i64,
     created_at := "2026-01-01", updated_at := "2026-01-02"
   } in
   match Json.parse (Codec.user_to_json u) {
     ok j => match Codec.user_from_json j {
       Option.some u2 =>
         u2.id == 7i64 && String.beq u2.name "Ada"
-        && String.beq u2.timezone "Europe/Oslo"
+        && u2.utc_offset_minutes == 120i64
         && (match u2.email { Option.some e => e == "a@example.com", Option.none => false }),
+      Option.none => false,
+    },
+    err _ => false,
+  }
+
+/// A payload written before the offset existed (or a client that omits it)
+/// decodes as UTC, not as a decode failure.
+#[test]
+def test_user_json_defaults_missing_offset : Bool :=
+  match Json.parse
+    ("{\"id\":7,\"issuer\":\"i\",\"subject\":\"s\",\"name\":\"n\"," ++
+     "\"created_at\":\"\",\"updated_at\":\"\"}") {
+    ok j => match Codec.user_from_json j {
+      Option.some u2 => u2.utc_offset_minutes == 0i64 && String.beq u2.name "n",
       Option.none => false,
     },
     err _ => false,

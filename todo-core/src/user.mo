@@ -20,8 +20,10 @@ pub struct User {
   email : Option String,
   name : String,
   picture : Option String,
-  /// IANA timezone name used only for display; storage is UTC.
-  timezone : String,
+  /// Fixed display offset east of UTC, in minutes (e.g. 120 for UTC+02:00).
+  /// Storage is UTC; there is no IANA/DST database at the pinned Monad
+  /// revision, so this offset is what the user selects. See `lib::stamp`.
+  utc_offset_minutes : I64,
   created_at : String,
   updated_at : String
 }

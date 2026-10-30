@@ -13,6 +13,7 @@ use lib::json_text {
 use std::map {BTreeMap}
 use std::list {List.filter, List.filter_map, List.length}
 use std::parse {Parse.i64}
+use lib::stamp {Stamp.canonical_due}
 
 pub type Action {
   add (title : String) (notes : String) (group : Option String) (tags : List String)
@@ -91,6 +92,35 @@ def Action.due_from (fields : BTreeMap String Json) : Option String :=
       err _ => Option.none,
     },
     Option.none => Option.none,
+  }
+
+/// Validate a due date at the request boundary. The domain stores the date
+/// string verbatim, so the form and JSON handlers call this before applying
+/// and return 400 rather than persisting something the view cannot parse.
+pub def Action.validate_due (due : Option String) : Result String (Option String) :=
+  match due {
+    Option.none => Result.ok Option.none,
+    Option.some raw => Stamp.canonical_due raw,
+  }
+
+pub def Action.due_valid (a : Action) : Bool :=
+  match a {
+    add _title _notes _group _tags due => Action.due_ok due,
+    edit _id _title _notes _group _tags due => Action.due_ok due,
+    toggle _ => true,
+    delete _ => true,
+    clear_completed => true,
+    set_status _ _ => true,
+    add_subtask _ _ => true,
+    toggle_subtask _ => true,
+    delete_subtask _ => true,
+    render => true,
+  }
+
+def Action.due_ok (due : Option String) : Bool :=
+  match Action.validate_due due {
+    Result.ok _ => true,
+    Result.err _ => false,
   }
 
 /// The full `add` decoder, shared by the JSON action API and the
