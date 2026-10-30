@@ -194,5 +194,13 @@ jobs:
             http://127.0.0.1:8095/api/actions -H 'content-type: application/json' \
             -d '{"type":"add","title":"bad","due_at":"2026-13-01"}')" = 400
 
+          # Regression: idle keep-alive sockets must not park the accept loop.
+          # moon's `Server.serve_concurrent` awaited its whole batch, so a
+          # browser's idle sockets stopped the SPA's `app.wasm` fetch (the
+          # intermittent "failed to mount / NetworkError"). See
+          # `todo-backend/src/serve.mo` and PLAN.md,
+          # `moon-serve-concurrent-parks-accept-loop`.
+          node web/keepalive.test.mjs http://127.0.0.1:8095 24 /web/app.wasm
+
           kill "$server"
           wait "$server" || true
