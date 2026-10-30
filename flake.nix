@@ -19,7 +19,7 @@
     # The toolchain, the runtime sources and the git-dependency sources all
     # come from the Monad flake, pinned to the same revision as every
     # mote.toml.
-    monad.url = "github:monad-lang/monad/a9d9a8115677546e41d89af923355b374817f897";
+    monad.url = "github:monad-lang/monad/6a59e0909cbc35ba1607061f7926d4347baf6f31";
 
     # Follow the Monad flake's nixpkgs for the image build as well: the
     # compiler's cached derivation was built with that pin, and one nixpkgs
@@ -39,7 +39,7 @@
       # clang stays off PATH.
       wasiSdk = import ./nix/wasi-sdk.nix { inherit pkgs; };
 
-      monadRev = "a9d9a8115677546e41d89af923355b374817f897";
+      monadRev = "6a59e0909cbc35ba1607061f7926d4347baf6f31";
       monadUrl = "https://github.com/monad-lang/monad.git";
       # sha256 of the URL string above; the git cache layout is
       # $MONAD_HOME/cache/git/checkouts/<this>/<rev>. Verified against a
@@ -120,7 +120,9 @@
           # beside the binary and resolve it through $ORIGIN, so the image
           # closure stays app + glibc + sqlite and the compiler's
           # llvm/clang/gc RUNPATH is not inherited.
-          cp -a ${pkgs.sqlite}/lib/libsqlite3.so* $out/app/lib/
+          # `pkgs.sqlite` defaults to the `bin` output in this nixpkgs; the
+          # shared library lives in the `out` output.
+          cp -a ${pkgs.sqlite.out}/lib/libsqlite3.so* $out/app/lib/
           patchelf \
             --set-interpreter ${pkgs.stdenv.cc.libc}/lib/ld-linux-x86-64.so.2 \
             --set-rpath '$ORIGIN/../lib:${pkgs.stdenv.cc.libc}/lib' \

@@ -1,12 +1,12 @@
-/// The wasm-safe Todo JSON codec.
+/// The hand-written Todo JSON codec, shared by the wasm SPA and the native
+/// backend.
 ///
-/// The native codec (`codec.mo`) uses the serde derive macros; those fail
-/// with `meta_eval_invoke … ce_arity_mismatch expected=1 got=0` when the
-/// deriving module is loaded through the SPA's dependency graph (the native
-/// backend expands the same code fine). This module is the hand-written
-/// fallback: it builds/reads the same wire shape with `Json.make_*`/
-/// `Json.parse`, and prints through `JsonText` so it never reaches the
-/// web-gated `Json.to_string`.
+/// It builds/reads the wire shape with `Json.make_*`/`Json.parse` and prints
+/// through `JsonText`, so it never reaches the web-gated `Json.to_string`.
+/// This used to be only the wasm fallback while `codec.mo` used serde's
+/// derive macros; the derives were removed after the pinned checker started
+/// exhausting memory on any test binary that included a derived module, so
+/// this is now the single implementation (`codec.mo` wraps it).
 use lib::storage {Status, Subtask, Todo}
 use lib::user {UserRef}
 use lib::json_text {JsonText.json_to_string}
@@ -213,6 +213,30 @@ pub def CodecWeb.todos_from_json (text : String) : Option (List Todo) :=
     err _ => Option.none,
   }
 
+/// The display offset from a `/api/me` envelope (`{"csrf":…,"user":{…}}`).
+/// A missing `utc_offset_minutes` (an older server) means UTC.
+pub def CodecWeb.me_offset_from_json (text : String) : Option I64 :=
+  match Json.parse text {
+    ok j => match Json.get_object j {
+      ok envelope => match Json.object_get "user" envelope {
+        Option.some user_j => match Json.get_object user_j {
+          ok fields => match Json.object_get "utc_offset_minutes" fields {
+            Option.none => Option.some 0i64,
+            Option.some n_j =>
+              match Json.get_num_i64 (Json.get_num n_j) {
+                ok n => Option.some n,
+                err _ => Option.none,
+              },
+          },
+          err _ => Option.none,
+        },
+        Option.none => Option.none,
+      },
+      err _ => Option.none,
+    },
+    err _ => Option.none,
+  }
+
 #[test]
 def test_codec_web_round_trips_due_and_audit : Bool :=
   let todos := List.cons ({ id := 1i64, title := "x", done := false,
@@ -229,3 +253,21 @@ def test_codec_web_round_trips_due_and_audit : Bool :=
     },
     Option.none => false,
   }
+
+#[test]
+def test_me_offset_defaults_to_utc : Bool :=
+  let with_offset := "{\"csrf\":\"c\",\"user\":{\"id\":1,\"utc_offset_minutes\":120}}"
+  in
+  let without := "{\"csrf\":\"c\",\"user\":{\"id\":1}}" in
+  (match CodecWeb.me_offset_from_json with_offset {
+    Option.some n => n == 120i64,
+    Option.none => false,
+  })
+  && (match CodecWeb.me_offset_from_json without {
+    Option.some n => n == 0i64,
+    Option.none => false,
+  })
+  && (match CodecWeb.me_offset_from_json "not json" {
+    Option.some _ => false,
+    Option.none => true,
+  })

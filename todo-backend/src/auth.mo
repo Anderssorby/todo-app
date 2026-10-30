@@ -1,12 +1,15 @@
 /// Authentication context and the development-only sign-in stub.
 ///
-/// Production sign-in is generic OAuth2/OIDC through the upcoming `oauth`
-/// mote (see the workspace plan). That mote is not in the pinned Monad
-/// revision, so this module currently provides the request context and a
-/// clearly gated dev path: `TODO_DEV_AUTH=1` (or `--dev-auth`) resolves a
-/// local `dev` user and no session cookie. The dev path is never enabled in
-/// the image/Kubernetes manifest, and it is removed when the OIDC flow
-/// lands.
+/// Production sign-in is generic OAuth2/OIDC through the `oauth` mote, which
+/// is present at the pinned Monad revision but is Phase 0-1: it implements the
+/// authorization-code + PKCE client flow, discovery and token exchange, but
+/// it has no JWT/JWKS parser and never validates an ID token (signature,
+/// issuer, audience, expiry, nonce). Accepting that token would authenticate
+/// nothing, so production sign-in is deliberately deferred and this module
+/// provides only the request context plus a clearly gated dev path:
+/// `TODO_DEV_AUTH=1` (or `--dev-auth`) resolves a local `dev` user and no
+/// session cookie. The dev path is never enabled in the image/Kubernetes
+/// manifest, and it is removed when the validated OIDC flow lands.
 ///
 /// The workspace is shared; `Context.user` is the actor used for
 /// attribution, not an ownership filter.

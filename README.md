@@ -8,8 +8,10 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
 ## Layout
 
 - `todo-core/` — pure, wasm-portable domain: `Todo`, actions, the JSON
-  codec, and the typed oak view (shared by the SSR page and the SPA; the
-  server lowers it to HTML with `Oak.to_html`, which drops event bindings).
+  codec, timestamp/due formatting through the `time` mote (`stamp.mo`), and
+  the typed oak view (shared by the SSR page and the SPA; the server lowers it
+  to HTML with `Oak.to_html`, which drops event bindings). Notes are rendered
+  with the `markdown` mote, with its safe defaults.
 - `todo-backend/` — native `moon` HTTP server with SQLite state through the
   `sql`/`sqlite` motes (`--db`/`-d`, default `todos.db`; migrations, users,
   sessions and OAuth-state tables, transactional load → apply → rewrite), a
@@ -42,7 +44,7 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
 
 The Monad motes are pinned to the public
 `https://github.com/monad-lang/monad.git` repository at
-`a9d9a8115677546e41d89af923355b374817f897` (see each `mote.toml`). The
+`6a59e0909cbc35ba1607061f7926d4347baf6f31` (see each `mote.toml`). The
 workspace root is virtual, so there is no root lock: `todo-core`,
 `todo-backend`, `todo-spa` and `todo-webgen` each carry their own committed
 `mote.lock`. After cloning or changing a manifest, run the only network step:
@@ -67,11 +69,11 @@ switch with:
 
 ```bash
 monadup list          # * marks the active toolchain
-monadup use nightly-2026-10-28-a9d9a811
+monadup use nightly-2026-10-30-6a59e090
 ```
 
-The repo pins `a9d9a811` (the latest nightly), so `monadup default` on that
-nightly is consistent. `scripts/check-toolchain.sh` compares `monad version`
+The repo pins `6a59e090` (the latest nightly at the time of writing), so
+`monadup default` on that nightly is consistent. `scripts/check-toolchain.sh` compares `monad version`
 with the pinned revision and fails with the matching `monadup use` command;
 the nightly workflow runs it before fetching or building. Filed as
 `compiler-mote-revision-skew-is-not-diagnosed` in [`PLAN.md`](PLAN.md); the
@@ -179,6 +181,53 @@ fetches the same file. `node web/boot_url.test.mjs` recomputes every hash.
 Run `todo-webgen` after building the SPA wasm and before starting the
 backend; `start.sh` does both. This forces fresh URLs, so a browser's cached
 failed module cannot poison the page.
+
+## Users, time and notes
+
+**Sign-in is deferred.** The pinned Monad revision now ships the `oauth`
+mote, but it is Phase 0-1: it implements authorization-code + PKCE,
+discovery and token exchange, yet it has no JWT/JWKS parser and never
+validates an ID token (issuer, audience, expiry, nonce, signature). Accepting
+that token would authenticate nothing, so `/auth/login` and
+`/auth/callback` return 503 with that explanation. The only sign-in is the
+gated local stub: start the server with `TODO_DEV_AUTH=1` (or `--dev-auth`)
+to resolve a local `dev` user. It is off by default and never enabled in the
+image or Kubernetes manifest. `GET /api/me` returns 401 in production and
+the SPA then shows its login view (it uses a real link, because the wasm
+runtime has no location API).
+
+**Time is stored in UTC and displayed at a fixed offset.** Timestamps are
+ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`); migration 2 added
+`users.utc_offset_minutes` and rewrote existing SQLite `datetime('now')`
+values to that shape. The user picks an offset from UTC-12:00 to UTC+14:00
+in the SPA's Settings tab, which posts `POST /api/me
+{"utc_offset_minutes":120}`. The `time` mote parses/formats the values
+(`todo-core/src/stamp.mo`); it has no IANA database or DST rules, so a fixed
+offset is the honest limit. `Instant.now` is deliberately unused: on compiled
+native binaries it is `CLOCK_MONOTONIC`, not a wall clock, and SQLite's
+`strftime` supplies "now".
+
+**Notes are Markdown.** The `markdown` mote renders them in both the SSR item
+and the SPA with `default_options` + `default_html_options`: raw HTML is
+escaped and `javascript:`/`vbscript:`/`file:` URLs are dropped. `data:image/`
+(including SVG) passes the mote's URL filter and is rendered as an `<img>`,
+which browsers do not script. The edit textarea always shows the raw source.
+The renderer lives in `todo-core/src/notes.mo`, deliberately isolated from
+`view.mo`: at this Monad revision, having the markdown call inside the large
+view module miscompiled `View.fragment_html` into a segfault (see `PLAN.md`).
+
+**JSON.** The native backend uses the same hand-written, wasm-safe codec as
+the SPA (`codec_web.mo`); `codec.mo` only re-exports/wraps it. The
+serde-derived DTOs were removed because the pinned compiler's checker
+exhausts memory (≈18 GB) when a test binary includes a serde-derived module,
+which made `monad test` and CI impossible (see `PLAN.md`).
+
+**Known browser limit.** The SPA re-renders the whole list on every tick, and
+the wasm bump allocator never reclaims memory. Rendering Markdown for
+hundreds of long notes on every render can exhaust that heap (the smoke
+harness's 64 KiB response test therefore uses long plain titles and a
+separate small Markdown note). Keep notes short or the list small until the
+renderer is cached or the runtime reclaims memory.
 
 ## Container image
 
