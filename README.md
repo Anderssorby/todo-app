@@ -142,6 +142,23 @@ whose last todo is deleted is dropped instead of hiding the rest of the
 list. The no-JS fallback still works: the server-rendered (urlencoded) forms
 post to the ordinary `/todos/...` routes.
 
+The server half of that mount path is guarded by a script that needs a
+running backend:
+
+```bash
+node web/keepalive.test.mjs http://127.0.0.1:8095
+```
+
+It holds a batch of idle keep-alive sockets and then requires a new
+connection to fetch `/web/app.wasm`. It exists because moon's
+`Server.serve_concurrent` awaited its whole batch of connection fibers before
+accepting again, and a fiber lives for the keep-alive socket: a few page
+loads' worth of idle browser sockets parked the accept loop, and the SPA's
+mount fetch died as `todo-spa: failed to mount TypeError: NetworkError when
+attempting to fetch resource` (intermittently, only after the server had been
+used for a while). `todo-backend/src/serve.mo` replaces that loop; see
+PLAN.md, `moon-serve-concurrent-parks-accept-loop`.
+
 The SPA half is exercised automatically over a stub DOM:
 
 ```bash

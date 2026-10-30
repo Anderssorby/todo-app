@@ -8,3 +8,4 @@ pub use lib::persist {*}
 pub use lib::form {*}
 pub use lib::handlers {*}
 pub use lib::logging {*}
+pub use lib::serve {*}

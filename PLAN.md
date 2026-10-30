@@ -996,6 +996,58 @@ Gaps recorded:
   `data:image/` (including SVG); inert as an `<img>`, but a sanitiser is
   required before allowing raw HTML.
 
+## Idle keep-alive sockets parked the accept loop (2026-10-30)
+
+Symptom, reported from a real browser session: the SPA occasionally failed to
+mount with
+
+    todo-spa: failed to mount TypeError: NetworkError when attempting to
+    fetch resource. boot.js:8:122
+
+The fetch that fails is `mount`'s `/web/app.wasm` request — a transport
+failure, not an HTTP status — and it is intermittent: the same page mounts on
+a cold start and fails after the server has been used for a while.
+
+Root cause is `moon`'s `Server.serve_concurrent` (Layer 1 / Phase 7), not the
+SPA. It accepts up to `max_in_flight` connections, forks one fiber per
+connection, and then **awaits every fiber it forked before accepting
+another**. A fiber lives as long as its socket, and `Server.serve_connection`
+has no idle timeout, so that bound counts *open browser sockets*, not
+in-flight requests: browsers keep idle keep-alive sockets for their keep-alive
+timeout and open up to six per host per tab, so a handful of page loads fills
+the batch. Once full, `tcp_accept` is never called; a new connection sits in
+the kernel backlog and its request is never read. The wasm fetch is the usual
+victim because it is the largest/last request of a mount, and one landing on a
+fresh connection hangs until the browser aborts it.
+
+Reproduced 2026-10-30 at `6a59e090` with the shipped binary: 16 idle
+keep-alive connections (`GET /web/boot.version`, sockets left open), then a
+17th connection whose request never answered; the server resumed only after
+sockets were closed. `web/keepalive.test.mjs` encodes this (holds 24 sockets,
+requires a new connection to serve `app.wasm` within 15 s) and runs in the
+nightly job against the booted dev server.
+
+Fix (this app): `todo-backend/src/serve.mo` runs its own accept loop instead
+of `Server.serve_concurrent`. Before every `tcp_accept` it reaps the fibers
+that have already stopped (`pollFiber`, non-blocking), so accepting never waits
+on a live keep-alive socket; idle sockets just cost one parked fiber each.
+`Serve.max_live` (256) bounds the threads: at the cap the loop waits for a
+connection to finish rather than accepting, which is genuine overload. A
+forked fiber that never started (thread creation failed) is detected on the
+spot and its socket closed, instead of leaving the client waiting. `App.serve`
+keeps the `tcp_listen_on` probe, so a busy port is still reported, and now
+logs a `Serve.run` bind failure instead of returning success.
+
+Gap recorded:
+
+- `moon-serve-concurrent-parks-accept-loop` — a batch-drained accept loop
+  over keep-alive connections is deadlock-shaped for any browser client: the
+  bound counts sockets, and a fiber only ends when the client closes. The
+  mote should reap finished fibers per accept (or bound in-flight *requests*,
+  not connections) and/or add an idle read timeout to keep-alive sockets. The
+  app-local loop stands in until then; re-test this before adopting a newer
+  moon.
+
 ## Gap-Logging Workflow (continuous, not deferred)
 
 After every `monad check`/`build`/`test`, wasm build/run, and curl check:

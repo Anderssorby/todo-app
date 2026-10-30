@@ -1,4 +1,4 @@
-use moon::server {Server.serve_concurrent, ServerConfig, ServerConfig.on}
+use moon::server {ServerConfig, ServerConfig.on}
 use moon::router {Route, Router.get, Router.post, Router.route}
 use moon::static_files {StaticConfig, StaticConfig.default, Static.handler}
 use moon::handler {Handler.try}
@@ -17,6 +17,7 @@ use lib::handlers {
 use lib::auth {Auth.require, Config, Context}
 use lib::db {Db.prepare, Store}
 use lib::logging {App.logger, App.request_logging}
+use lib::serve {Serve.run}
 use log::logger {Logger.error, Logger.info}
 use clap::spec {
   Cli.CommandSpec, Cli.Parsed, Cli.command, Cli.flag, Cli.flag_set,
@@ -83,11 +84,12 @@ def App.routes (auth : Config) : List Route :=
     static_assets
   ]
 
-// `Server.serve_concurrent` (fiber-per-connection) rather than the
-// sequential `Server.run`: the latter serves one kept-alive connection at a
-// time, so a browser's parallel module fetches can stall behind the page
-// connection and the SPA never mounts. `ServerConfig.on` keeps the 0.0.0.0
-// host and port; the explicit `tcp_listen_on` probe preserves the busy-port
+// The accept loop is `lib::serve`'s, not moon's `Server.serve_concurrent`:
+// the latter drains a whole batch of connection fibers before accepting
+// again, and a fiber lives for the keep-alive socket, so a browser holding
+// enough idle sockets parks the loop and the SPA's `app.wasm` fetch never
+// gets served (see `serve.mo`). `ServerConfig.on` keeps the 0.0.0.0 host
+// and port; the explicit `tcp_listen_on` probe preserves the busy-port
 // error.
 def App.listen_address (host : String) (port : U16) : String :=
   host ++ ":" ++ U16.to_string port
@@ -170,7 +172,7 @@ def App.serve (config : ServerConfig) (auth : Config) : IO I64 := do {
   // buffer indefinitely while the server blocks.
   let _ <- flush_stdout;
   // Probe the bind first so a busy port is still reported, then hand the
-  // port to the fiber-per-connection loop.
+  // port to `Serve.run`'s fiber-per-connection accept loop.
   let probe : Result StreamError FdStream <- tcp_listen_on config.host config.port;
   match probe {
     Result.err e => do {
@@ -179,9 +181,15 @@ def App.serve (config : ServerConfig) (auth : Config) : IO I64 := do {
     },
     Result.ok listener => do {
       let _ <- Stream.close listener;
-      Server.serve_concurrent
-        (App.request_logging (Router.route (App.routes auth))) config.port 16i64;
-      return 0i64
+      let served <- Serve.run config.host config.port
+        (App.request_logging (Router.route (App.routes auth)));
+      match served {
+        Result.ok _ => return 0i64,
+        Result.err e => do {
+          let _ <- Logger.error App.logger ("server exited: " ++ e);
+          return 1i64
+        },
+      }
     },
   }
 }
