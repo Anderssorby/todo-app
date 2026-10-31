@@ -1000,7 +1000,8 @@ published nightly.
   `scripts/check-toolchain.sh` reads the one revision from the root manifest.
 - `start.sh` became `start.mo`, a script module
   (`#![mote { name := "start", deps := [init, std] }]`) run with
-  `monad run start.mo`. It uses `std::process.exec_cmd` (inherited stdio and
+  `monad run start.mo` (superseded below by the `[[script]]` declaration).
+  It uses `std::process.exec_cmd` (inherited stdio and
   process group) for the three builds and the server, returns the server's
   exit status, and forwards argv after `--`. It must run from the repository
   root; a missing member lock suggests `scripts/fetch-deps.sh`.
@@ -1028,6 +1029,80 @@ server-side session/cookie. Reusable from `oauth`: `OauthHttp`, `Pkce`,
 `OauthError`; its OIDC `Discovery` and bearer `Token.parse` do not fit
 ATproto, and PAR/DPoP remain Phase 7 upstream.
 
+## Toolchain bump: Monad main 632d1825, start.mo as a `[[script]]` (2026-10-31)
+
+The pin moved again, this time off the nightly channel to Monad `main` at
+`632d1825dd65f8250c56a2228285c99fa3ff7b13` (2026-10-31), which is NEWER than
+the latest published nightly (`a4d8fde7`). The reason is the moon work that
+landed after that nightly. The compiler/mote pair must still match, so the
+flake and every mote move together; the workspace lock was refetched and all
+19 entries now name `632d1825`.
+
+- `start.mo` is no longer a self-describing module. The root `mote.toml`
+  declares it:
+
+  ```toml
+  [[script]]
+  name = "start"
+  path = "start.mo"
+  ```
+
+  and the file dropped its `#![mote { name := "start", deps := [init, std] }]`
+  annotation. It only uses `init` and `std`, which the compiler resolves from
+  its toolchain (the Nix build sets `MONAD_ROOT` to the pinned source tree).
+  No `[script-dependencies.start]` table is needed. The build key is widened
+  to the workspace because the root has no `[mote]` and `[[script]] mote =`
+  is parsed but not consulted by `monad script` (gap
+  `script-mote-field-unused`); that is sound, just coarse. `monad script start` (alias
+  `monad s start`) builds and runs it; program arguments follow `--`:
+  `monad script start -- --port 3000`. `monad run start.mo` still works but is
+  no longer the documented entry point.
+- The nightly workflow no longer assumes the pin is a published nightly. It
+  installs the latest nightly, and when `scripts/check-toolchain.sh` fails it
+  asks GitHub's compare API whether the nightly is behind the pin. Behind: it
+  builds the pinned compiler from the flake's own Monad input (the Cachix
+  cache may already hold it; otherwise it bootstraps once), exports
+  `MONAD_ROOT`, and prepends its `bin`.
+  Ahead: it fails and asks for a pin bump, so the "newer nightly => bump"
+  signal is kept.
+- moon's new work is present in the pinned sources: the hardened transformer
+  server (`Server.run_t`/`run_with`, with continuous acceptance, per-request
+  head/body/idle/write deadlines, header/body limits, strict request parsing
+  and `Expect: 100-continue`), explicit session policy, fail-closed CSRF and
+  CORS config, and browser live-reload. Only the first matters for the
+  keep-alive gap: `Server.serve_concurrent` is unchanged, so the custom
+  non-parking loop in `todo-backend/src/serve.mo` is still what the backend
+  serves with. The hardened path takes a `HandlerT`, whose `Ctx` exposes the
+  method, path, headers and body but not the raw `Request` (notably not the
+  query string), so switching is a handler-layer rewrite rather than a
+  one-line change; it is left as follow-up work.
+- `scripts/check-toolchain.sh` now prints the Nix fallback when no installed
+  nightly carries the pin, and the flake's `monad check start.mo` still checks
+  the script in script mode.
+
+Verification at `632d1825` (pinned compiler; `monad check --workspace
+--locked` reports 0 errors and the same 178 affine warnings): `monad script
+--list` resolves `./start -> start.mo`, `monad check start.mo` passes, and
+`monad test --locked todo-core/src todo-backend/src todo-webgen/src` passes
+93/93. The SPA, `todo-webgen` and backend build, and the loader moved to
+`4c914889…` (`boot.version`; was `9778e3a6…`). `boot_url.test.mjs`,
+`runtime_args.test.mjs`, `smoke.mjs` and `SMOKE_UNAUTH=1 smoke.mjs` pass. The
+server checks pass: production gating (`/api/todos` 401, `/` 302), dev-auth
+`/api/me`, the offset update/validation, transactional add/read-back (ISO
+timestamps) and due-date validation, plus the 24-idle-socket keep-alive test.
+`monad script start -- --port 18097 --db …` ran all four steps and served;
+SIGTERM to the script's `start` process killed the backend (pdeathsig) and
+freed the port. The flake's OCI image builds at the new pin
+(`nix build --accept-flake-config .#image`).
+
+Local toolchain caveat: the flake package's `bin/monad` is wrapped with the
+flake's own clang/glibc, while this app's devshell comes from a different
+nixpkgs whose `sqlite` needs newer glibc symbols; the first fresh link at the
+new pin failed with `undefined reference to cosh@GLIBC_2.44`. Running the
+unwrapped `$monad_bin/share/monad/monad` with the devshell's clang,
+pkg-config and sqlite links cleanly, which is the form README and the nightly
+fallback use. The Nix image build is unaffected (one nixpkgs throughout).
+
 ## Gaps recorded:
 
 - `oauth-mote-present-but-no-id-token-validation` — **closed at
@@ -1043,6 +1118,13 @@ ATproto, and PAR/DPoP remain Phase 7 upstream.
   exists. Workaround here: committed `mote.lock -> ../mote.lock` symlinks in
   each member (`scripts/fetch-deps.sh` recreates them). Upstream should use
   `m.workspace_root`, as `Build.fetch_locked` already does.
+- `script-mote-field-unused` — `[[script]] mote = "..."` is parsed into
+  `ScriptTarget` and documented as the manifest/closure the script uses, but
+  `monad script` only consults its own `--mote` flag
+  (`cli/src/main.mo`'s `script_build_and_run`); the manifest field is dead.
+  At this app's virtual root that widens the root script's build key to the
+  whole workspace (sound, but `start.mo` recompiles on any workspace change).
+  Upstream should default `mote_name` from `ScriptTarget.script_mote t`.
 - `spa-markdown-preview-memory-cost` — the SPA renders Markdown for every
   note on every full re-render, and the wasm bump allocator never frees. A
   smoke run with 700 notes of 200 characters exhausted the heap and crashed

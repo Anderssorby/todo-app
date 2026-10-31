@@ -45,6 +45,13 @@ if command -v monadup >/dev/null 2>&1; then
       if (short == substr(p, 1, 7)) { print tag; exit } }')"
   if [ -n "$tag" ]; then
     echo "switch to the pinned toolchain with: monadup use $tag" >&2
+  else
+    # A main revision pinned between nightlies: build the same compiler the
+    # image uses, from the flake's Monad input.
+    echo "no installed nightly carries the pin; build the pinned compiler:" >&2
+    echo "  monad_bin=\"\$(nix build --accept-flake-config --no-link --print-out-paths 'github:monad-lang/monad/$pin#monad')\"" >&2
+    echo "  export PATH=\"\$monad_bin/share/monad:\$PATH\"   # unwrapped: use the devshell's toolchain" >&2
+    echo "  export MONAD_ROOT=\"\$(nix flake prefetch --json 'github:monad-lang/monad/$pin' | jq -r .storePath)\"" >&2
   fi
   echo "installed toolchains: monadup list" >&2
 fi
