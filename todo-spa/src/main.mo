@@ -487,9 +487,9 @@ def Spa.login_view : Oak.Node Msg :=
   Html.div [Html.class_ ["login-view"]]
     [ Html.h1 List.empty [Html.text "todo-app"],
       Html.p List.empty
-        [Html.text "Sign-in is not enabled in this build. For local use, start the server with TODO_DEV_AUTH=1."],
+        [Html.text "Sign-in is not enabled in this build. AT Protocol OAuth needs DPoP ES256 signing, which the pinned Monad crypto mote does not provide yet. For local use, start the server with TODO_DEV_AUTH=1."],
       Html.p List.empty
-        [ Html.a [Html.href "/auth/login"] [Html.text "Open the sign-in page"],
+        [ Html.a [Html.href "/login"] [Html.text "Sign-in status"],
           Html.text " or ",
           Html.button [Html.type_ "button", Spa.on_click Msg.retry_load]
             [Html.text "retry"] ] ]

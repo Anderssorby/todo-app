@@ -758,8 +758,8 @@ consumer but keeps its own `#[test]`s.
   of `boot.js`). `Persist.loader_version` reads `boot.version`, the page
   builders take it and emit `/web/boot.js?v=<hash>`, and `web/index.html`
   fetches the same file. `web/boot_url.test.mjs` recomputes every SHA-256;
-  `todo-webgen` has 6 tests. `start.sh` builds the SPA, runs webgen, then
-  builds/starts the backend. The SPA's kanban cards are asserted
+  `todo-webgen` has 6 tests. `monad run start.mo` builds the SPA, runs webgen,
+  then builds/starts the backend. The SPA's kanban cards are asserted
   `draggable="true"` with dragstart/dragend listeners in `web/smoke.mjs`;
   the cards are not draggable until the SPA mounts, which is why a module
   failure also looks like "starting the card drag does not work" (the SSR
@@ -771,7 +771,7 @@ consumer but keeps its own `#[test]`s.
   `web_runtime.gen.js` "failed to load" and the SPA never mounted.
   `todo-backend` now probes `tcp_listen_on` (preserving the busy-port error)
   and runs `Server.serve_concurrent` with `max_in_flight = 16`. Verified in
-  Chromium against `./start.sh`: six fresh loads all mounted; a native
+  Chromium against `monad run start.mo`: six fresh loads all mounted; a native
   `dragTo` moved "Learn Monad" from To do to Doing; a synthetic DragEvent
   moved "Build a todo app" from To do to Done, with the API and DOM agreeing
   and no non-favicon console errors.
@@ -813,6 +813,8 @@ The app now consumes the Monad motes as git dependencies pinned to
 `../../monad` path dependency. The root workspace is virtual (no `[mote]`), so
 there is no root lock: `todo-core`, `todo-backend`, `todo-spa` and
 `todo-webgen` each carry a committed `mote.lock` (5/9/9/3 entries).
+(Superseded 2026-10-31: inheritance gives one root `mote.lock`, with committed
+per-member symlinks; see the section below.)
 `scripts/fetch-deps.sh` is the one-time network step (`monad fetch` per
 member, then an offline pass); every build/check/test uses `--locked` and
 never fetches. The loader ABI is unchanged between the vendored loader's
@@ -886,6 +888,7 @@ The public Monad HEAD moved to `6a59e090` (nightly 2026-10-30), which is the
 first revision shipping `motes/time`, `motes/oauth` and `motes/markdown`.
 Every manifest, `flake.nix` and `flake.lock` was bumped together (the
 revision-skew guard still applies) and the four `mote.lock`s regenerated.
+(Superseded 2026-10-31: one root lock; see the next toolchain section.)
 
 Decisions:
 
@@ -897,7 +900,9 @@ Decisions:
   Accepting that token would authenticate nothing, so `/auth/login` and
   `/auth/callback` return 503 with that explanation and the gated
   `TODO_DEV_AUTH` stub remains the only sign-in. No `oauth` dependency is
-  added to any manifest.
+  added to any manifest. (Superseded 2026-10-31: `a4d8fde7` ships
+  `jsonwebtoken` and the oauth token validation; ATproto sign-in now waits
+  only on DPoP ES256 signing.)
 - **Time is a fixed offset.** The `time` mote has ISO-8601 parsing/printing,
   calendar conversion and a `TimeZone` class that is an empty seam for a
   future tz-database mote; there is no IANA or DST support. `users.timezone`
@@ -966,21 +971,78 @@ Re-tested gaps:
 - The old serde derive-reflection failure in the SPA graph is moot for this
   app (serde is gone). The `time` mote's `#[derive BEq BOrd]` types do compile
   and run in the wasm SPA, so std's structural derives are fine at this pin.
-- `workspace = true` **was re-tested at `6a59e090`** in a throwaway copy of
-  the repo. A path dependency no longer makes `monad check` hang (the old
-  failure), but the consumer still cannot load its submodules: with
-  `[dependencies.todo_core] workspace = true` the SPA check reports `Todo`,
-  `Status` and `Stamp.*` as unknown, so the root is resolved and the modules
-  are not. A git dependency is inherited even less: `monad fetch`/`monad
-  update` write an **empty** `mote.lock` (0 entries), and the subsequent
-  workspace check then fails 226 errors. Full inheritance remains unusable;
-  the members keep explicit path/git sources.
+- `workspace = true` **now works** at `a4d8fde7` (PR #149): every member
+  inherits the root's `[workspace.dependencies]`, including the root-relative
+  `todo_core` path; `monad fetch` writes one root `mote.lock` (19 entries) and
+  the workspace check loads the SPA's submodules. The per-member `--locked`
+  verify path still reads `<member>/mote.lock`, though, so each member carries
+  a committed symlink to the root lock (gap
+  `workspace-member-lock-lookup`).
 
-Gaps recorded:
+## Toolchain bump: a4d8fde7, workspace inheritance, start.mo (2026-10-31)
 
-- `oauth-mote-present-but-no-id-token-validation` — available at
-  `6a59e090`, unusable for production sign-in until the JWT/JWKS and
-  `Pubkey.verify` phases land.
+The pin moved from `6a59e090` to
+`a4d8fde74d2e4148c424b336b87624133f08cba6`
+(`nightly-2026-10-30-a4d8fde7`), which ships `motes/jsonwebtoken`, crypto
+signature verification, and an oauth client that validates tokens. Monad main
+also has `Bearer.require` (resource-server guard) at `888357ea`, but no
+nightly tags it yet; the app does not consume it (it uses cookie sessions,
+and ATproto tokens are opaque and DPoP-bound), so the pin stays at the
+published nightly.
+
+- The members now inherit every source from the root
+  `[workspace.dependencies]` with `workspace = true`; the root-relative
+  `todo_core` path is inherited too. `monad fetch` writes one root
+  `mote.lock` (19 entries), and the four per-member locks were replaced by
+  committed symlinks to it (see `workspace-member-lock-lookup`).
+- `scripts/fetch-deps.sh` fetches the workspace once (online, then
+  `--offline`) and recreates any missing symlinks;
+  `scripts/check-toolchain.sh` reads the one revision from the root manifest.
+- `start.sh` became `start.mo`, a script module
+  (`#![mote { name := "start", deps := [init, std] }]`) run with
+  `monad run start.mo`. It uses `std::process.exec_cmd` (inherited stdio and
+  process group) for the three builds and the server, returns the server's
+  exit status, and forwards argv after `--`. It must run from the repository
+  root; a missing member lock suggests `scripts/fetch-deps.sh`.
+- `web/boot.js` and `web/boot.version` were regenerated at the new loader
+  hash.
+- `start.mo` starts the server under `setpriv --pdeathsig TERM` (fallback:
+  a direct `exec` when util-linux is absent), so a script killed by signal
+  takes the backend and its listening socket with it instead of orphaning
+  them. Verified: SIGTERM to the script killed the server and freed the port;
+  SIGKILL of the server followed by an immediate restart on the same port and
+  SQLite database succeeded (the TIME_WAIT entries are client-side).
+- The auth text now names the real blocker: ATproto OAuth needs DPoP ES256
+  signing, and `motes/crypto` verifies but cannot generate or sign. The
+  capability is planned in `monad-plans/library-ideas/crypto-primitives.md`.
+  No `oauth`/`jsonwebtoken` dependency is added yet.
+
+Deferred ATproto flow (design only; no code until `crypto` can sign): the
+public-client flow resolves handle → DID → DID document → `#atproto_pds`,
+fetches the PDS protected-resource metadata and the AS
+`/.well-known/oauth-authorization-server`, then runs PAR with PKCE S256 and a
+per-session ES256 DPoP proof (retrying once on `use_dpop_nonce`), exchanges
+the code for DPoP-bound tokens, checks `iss`, `cnf.jkt` and the `sub` DID,
+confirms the identity with `com.atproto.server.getSession`, and creates the
+server-side session/cookie. Reusable from `oauth`: `OauthHttp`, `Pkce`,
+`OauthError`; its OIDC `Discovery` and bearer `Token.parse` do not fit
+ATproto, and PAR/DPoP remain Phase 7 upstream.
+
+## Gaps recorded:
+
+- `oauth-mote-present-but-no-id-token-validation` — **closed at
+  `a4d8fde7`** by `motes/jsonwebtoken` plus `motes/crypto`'s ES256
+  verification.
+- `atproto-dpop-needs-es256-signing` — ATproto OAuth requires a per-session
+  P-256 key and ES256 DPoP proofs (RFC 9449); `motes/crypto` verifies
+  signatures but cannot generate a key or sign. Tracked in
+  `monad-plans/library-ideas/crypto-primitives.md` (new signing phase).
+- `workspace-member-lock-lookup` — `Build.verify_home` reads
+  `<member>/mote.lock` instead of the workspace root's one lock, so a member
+  built with inherited dependencies fails `--locked` unless a per-member lock
+  exists. Workaround here: committed `mote.lock -> ../mote.lock` symlinks in
+  each member (`scripts/fetch-deps.sh` recreates them). Upstream should use
+  `m.workspace_root`, as `Build.fetch_locked` already does.
 - `spa-markdown-preview-memory-cost` — the SPA renders Markdown for every
   note on every full re-render, and the wasm bump allocator never frees. A
   smoke run with 700 notes of 200 characters exhausted the heap and crashed

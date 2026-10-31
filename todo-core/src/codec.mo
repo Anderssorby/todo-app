@@ -1,8 +1,8 @@
 /// The shared JSON codec.
 ///
 /// This module used to build/read the wire shape through `motes/serde`'s
-/// derive macros. At the pinned Monad revision (`6a59e090`) the checker
-/// exhausts memory (≈18 GB) when a test binary includes a serde-derived
+/// derive macros. At `6a59e090` (where they were removed) the checker
+/// exhausted memory (≈18 GB) when a test binary included a serde-derived
 /// module, so the derive path is gone: `codec_web.mo`'s hand-written encoder —
 /// already the wasm-safe implementation — is the single codec, and the
 /// native backend delegates to it. That also removes the old wasm-derive gap

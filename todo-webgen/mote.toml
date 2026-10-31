@@ -16,10 +16,10 @@
 # building/starting the backend. `web/boot_url.test.mjs` re-checks every
 # hash against the files.
 #
-# Workspace-dependency hybrid: this mote has no PATH deps, and the compiler
-# at the pinned revision does not inherit GIT deps, so the Monad sources
-# stay explicit; the canonical copy also lives in the root
-# `[workspace.dependencies]`.
+# Every dependency inherits the workspace root's `[workspace.dependencies]`
+# (`workspace = true`), so this file no longer repeats the Monad revision.
+# The workspace root's `mote.lock` is the one committed lock for all four
+# members.
 #
 # This is an app-side consumer of `jsgen` (the same emitter `web_wasm` uses
 # for the ABI loader); the vendored loader files themselves stay verbatim.
@@ -33,19 +33,13 @@ name = "todo-webgen"
 path = "src/main.mo"
 
 [dependencies.init]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "init"
+workspace = true
 
 [dependencies.std]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "std"
+workspace = true
 
 [dependencies.jsgen]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/jsgen"
+workspace = true
 
 [affine]
 mode = "warn"

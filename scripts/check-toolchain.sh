@@ -13,8 +13,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Every member pins the same revision; assert that before comparing.
-pins="$(grep -h '^rev = "' todo-core/mote.toml todo-backend/mote.toml todo-spa/mote.toml todo-webgen/mote.toml | sed 's/^rev = "\(.*\)"$/\1/' | sort -u)"
+# The members inherit every source from the workspace root's
+# `[workspace.dependencies]`, so the root manifest is the single place the
+# revision is pinned; assert it names exactly one revision before comparing.
+pins="$(grep -h '^rev = "' mote.toml | sed 's/^rev = "\(.*\)"$/\1/' | sort -u)"
 count="$(printf '%s\n' "$pins" | wc -l | tr -d ' ')"
 if [ "$count" != 1 ]; then
   echo "manifests disagree on the Monad revision:" >&2

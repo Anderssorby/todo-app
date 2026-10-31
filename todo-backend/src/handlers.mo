@@ -381,26 +381,27 @@ pub def Handlers.login_page (config : Config) (req : Request) : IO Response := d
   let html :=
     "<!doctype html><html><head><meta charset=\"utf-8\"><title>todo-app</title>" ++
     "</head><body><h1>todo-app</h1>" ++
-    "<p>Sign-in is disabled in this build: the pinned oauth mote cannot yet " ++
-    "validate an ID token. For local use, start the server with " ++
-    "<code>TODO_DEV_AUTH=1</code>.</p>" ++
-    "<p><a href=\"/auth/login\">Sign in with SSO</a></p>" ++
+    "<p>Sign-in is disabled in this build: AT Protocol OAuth needs DPoP " ++
+    "proofs signed with a per-session ES256 key, and Monad's crypto mote " ++
+    "can verify but not yet generate a P-256 key or sign. For local use, " ++
+    "start the server with <code>TODO_DEV_AUTH=1</code>.</p>" ++
     "</body></html>";
   return (Handlers.html_response html)
 }
 
 /// A 503 that says why sign-in is unavailable, rather than pretending the
-/// route does not exist. The `oauth` mote is present at the pinned revision,
-/// but it is Phase 0-1: it has no JWT/JWKS parser and no signature
-/// verification, so accepting an ID token would authenticate nothing.
+/// route does not exist. The oauth mote validates tokens now, but ATproto
+/// OAuth requires DPoP with a per-session ES256 key, and the crypto mote has
+/// no key generation or signing yet.
 def Handlers.sign_in_unavailable : IO Response := do {
   let _ <- Logger.warn App.logger
-    ("OAuth sign-in is disabled: the pinned oauth mote has no ID-token validation");
+    ("OAuth sign-in is disabled: ATproto DPoP requires ES256 signing, which the crypto mote does not provide");
   let r := Response.ok_text
-    ("OAuth sign-in is not enabled in this build. The pinned oauth mote " ++
-     "implements the authorization-code + PKCE client flow but cannot " ++
-     "validate an ID token yet (no JWT/JWKS/signature verification), so " ++
-     "production sign-in is deferred. Use TODO_DEV_AUTH=1 for local sign-in.");
+    ("OAuth sign-in is not enabled in this build. AT Protocol OAuth requires " ++
+     "DPoP proofs signed with a per-session ES256 key; Monad's crypto mote " ++
+     "can verify signatures but cannot yet generate a P-256 key or sign. " ++
+     "Production sign-in is therefore deferred. Use TODO_DEV_AUTH=1 for " ++
+     "local sign-in.");
   return { r with status := Status.service_unavailable,
     headers := Headers.set "Content-Type" "text/plain; charset=utf-8" Headers.empty }
 }
