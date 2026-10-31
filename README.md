@@ -37,8 +37,9 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
   git dependencies) and the OCI image.
 - `deploy/` — the container entrypoint, Kubernetes manifests, and deployment
   notes.
-- `start.mo` — rebuilds the SPA, the hash-pinned loader and the backend, then
-  runs the backend with forwarded argv (`monad run start.mo`).
+- `start.mo` — a `[[script]]` in the root `mote.toml`; it rebuilds the SPA,
+  the hash-pinned loader and the backend, then runs the backend with
+  forwarded argv (`monad script start`).
 - `scripts/fetch-deps.sh` — the one-time network step that resolves the
   pinned Monad git dependencies and writes the workspace's root `mote.lock`.
 
@@ -46,13 +47,14 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
 
 The Monad motes are pinned to the public
 `https://github.com/monad-lang/monad.git` repository at
-`a4d8fde74d2e4148c424b336b87624133f08cba6` in the root `mote.toml`; every
-member inherits those sources with `workspace = true`. `monad fetch` writes
-one root `mote.lock` for the whole workspace. The four member `mote.lock`
-files are committed symlinks to it, because the per-member `--locked` verify
-path still reads `<member>/mote.lock` instead of the workspace root's (see
-`PLAN.md`, `workspace-member-lock-lookup`). After cloning or changing a
-manifest, run the only network step:
+`632d1825dd65f8250c56a2228285c99fa3ff7b13` (Monad `main`, 2026-10-31) in the
+root `mote.toml`; every member inherits those sources with
+`workspace = true`. `monad fetch` writes one root `mote.lock` for the whole
+workspace. The four member `mote.lock` files are committed symlinks to it,
+because the per-member `--locked` verify path still reads `<member>/mote.lock`
+instead of the workspace root's (see `PLAN.md`,
+`workspace-member-lock-lookup`). After cloning or changing a manifest, run
+the only network step:
 
 ```bash
 scripts/fetch-deps.sh
@@ -69,18 +71,32 @@ that ABI changes between revisions. A mismatch is not diagnosed by
 NULL, so `todo-backend` segfaulted inside `sqlite3_open_v2` and
 `todo-webgen` read an empty `app.wasm` and pinned the empty-string hash
 (`e3b0c44…`) in the loader. The flake pins the toolchain, so the image is
-unaffected; a local `monad` from `monadup default` may not be. Check and
-switch with:
+unaffected; a local `monad` from `monadup default` may not be.
+
+The repo pins `632d1825` (Monad `main` on 2026-10-31), which is newer than the
+latest published nightly. Until a nightly carries it, build the pinned
+compiler from the same flake input the image uses (the Cachix cache may
+already hold it; otherwise Nix bootstraps it once):
 
 ```bash
-monadup list          # * marks the active toolchain
-monadup use nightly-2026-10-30-a4d8fde7
+monad_bin="$(nix build --accept-flake-config --no-link --print-out-paths \
+  'github:monad-lang/monad/632d1825dd65f8250c56a2228285c99fa3ff7b13#monad')"
+# The package's bin/monad is wrapped with the flake's own clang/llvm/GC (the
+# image uses exactly that). In a devshell from a different nixpkgs, that
+# wrapper's glibc and the devshell's sqlite disagree at link time, so run the
+# unwrapped binary and let the devshell supply one consistent toolchain:
+export PATH="$monad_bin/share/monad:$PATH"
+# Where the bare compiler finds init/std/llvm/runtime:
+export MONAD_ROOT="$(nix flake prefetch --json \
+  'github:monad-lang/monad/632d1825dd65f8250c56a2228285c99fa3ff7b13' \
+  | jq -r .storePath)"
 ```
 
-The repo pins `a4d8fde7` (the latest nightly at the time of writing), so
-`monadup default` on that nightly is consistent. `scripts/check-toolchain.sh` compares `monad version`
-with the pinned revision and fails with the matching `monadup use` command;
-the nightly workflow runs it before fetching or building. Filed as
+Once a nightly carries the pin, `monadup use <that tag>` replaces the block
+above (and `monadup list` shows the installed tags). `scripts/check-toolchain.sh` compares `monad version`
+with the pinned revision and fails with the matching `monadup use` command, or
+with the Nix fallback when no installed nightly has it;
+the nightly workflow runs the same selection before fetching or building. Filed as
 `compiler-mote-revision-skew-is-not-diagnosed` in [`PLAN.md`](PLAN.md); the
 checker should reject a compiler whose revision differs from the pinned
 `std`/`runtime`, and the `db::test_db_migrates_and_round_trips` test plus
@@ -107,16 +123,19 @@ monad test --workspace --locked
 Or rebuild everything and run it in one command, from the repository root:
 
 ```bash
-monad run start.mo                  # builds SPA + loader + backend, then serves
-monad run start.mo -- --port 3000   # flag-like program args need `--`
+monad script start                  # builds SPA + loader + backend, then serves
+monad script start -- --port 3000   # flag-like program args need `--`
+monad s start                       # the short spelling
 ```
 
-`start.mo` is a Monad script module (`#![mote { … }]`), not a shell script; it
-runs the three builds with inherited stdio, then the backend, and returns its
-exit status. The server runs under `setpriv --pdeathsig TERM` when util-linux
-is available, so terminating the script also terminates the server and
-releases the listening port; without `setpriv`, Ctrl-C (or killing the process
-group) stops both.
+`start.mo` is a `[[script]]` declared in the root `mote.toml`, not a shell
+script and no longer a self-describing `#![mote { … }]` module: it uses only
+`init` and `std`, which the compiler resolves from its toolchain. It runs the
+three builds with inherited stdio, then the backend, and returns its exit
+status. The server runs under `setpriv --pdeathsig TERM` when util-linux is
+available, so terminating the script also terminates the server and releases
+the listening port; without `setpriv`, Ctrl-C (or killing the process group)
+stops both.
 
 WASM:
 
@@ -215,7 +234,7 @@ SHA-256 of `boot.js`; the backend reads it (`Persist.loader_version`) and
 emits `/web/boot.js?v=<hash>` in the SSR shell, while `web/index.html`
 fetches the same file. `node web/boot_url.test.mjs` recomputes every hash.
 Run `todo-webgen` after building the SPA wasm and before starting the
-backend; `monad run start.mo` does both. This forces fresh URLs, so a
+backend; `monad script start` does both. This forces fresh URLs, so a
 browser's cached failed module cannot poison the page.
 
 ## Users, time and notes

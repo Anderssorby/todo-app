@@ -73,21 +73,65 @@ jobs:
           echo "WASI_SDK_PATH=$HOME/wasi-sdk" >> "$GITHUB_ENV"
           "$HOME/wasi-sdk/bin/clang" --version | head -1
 
+      - name: Install Nix
+        # Only used when no published nightly carries the pin yet (see the
+        # selection step). The Cachix cache may already hold the compiler;
+        # otherwise this bootstraps it once.
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
       - name: Install the latest Monad nightly
         run: |
           curl -fsSL https://monad-lang.org/install | bash
           export PATH="$HOME/.monad/bin:$PATH"
           monadup default
-          echo "$HOME/.monad/bin" >> "$GITHUB_PATH"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
           monad version
           monadup doctor
 
       # The compiler's runtime must match the pinned std/runtime: a mismatch
       # links and then misbehaves at runtime (see the boot step at the bottom).
       # Failing here means the latest nightly has moved past the pin -- bump
-      # every mote and the flake together, not just this job.
-      - name: Check the toolchain matches the pin
-        run: scripts/check-toolchain.sh
+      # every mote and the flake together, not just this job. A pin between
+      # nightlies (main ahead of the last release) is not a mismatch: build the
+      # pinned compiler from the flake's own Monad input and use that instead.
+      - name: Select the pinned compiler
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if scripts/check-toolchain.sh; then
+            echo "the latest nightly is the pin"
+            exit 0
+          fi
+
+          pin="$(grep -h '^rev = "' mote.toml | sed 's/^rev = "\(.*\)"$/\1/' | sort -u | tr -d '\n')"
+          nightly="$(monad version | head -1 | awk '{print $1}')"
+          # `compare` orders the pin against the installed nightly: "ahead"
+          # means the nightly contains the pin and is NEWER, so the pin is the
+          # thing to bump; "behind" means the nightly has not caught up yet.
+          status="$(gh api "repos/monad-lang/monad/compare/${pin}...${nightly}" --jq .status)"
+          if [ "$status" != "behind" ]; then
+            echo "the latest nightly ($nightly) is $status the pin ($pin)" >&2
+            echo "bump the pin to the nightly instead of building the pin" >&2
+            exit 1
+          fi
+
+          echo "no nightly carries $pin yet; building the pinned compiler"
+          bin="$(nix build --accept-flake-config --no-link --print-out-paths \
+            "github:monad-lang/monad/${pin}#monad")"
+          src="$(nix flake prefetch --json "github:monad-lang/monad/${pin}" \
+            | jq -r .storePath)"
+          # Put the pinned compiler first; `$PATH` already names the nightly.
+          # Use the unwrapped binary (`bin/monad` is wrapped with the flake's
+          # own clang/glibc; here the job's apt toolchain is the consistent
+          # one, exactly as the monadup nightly uses it).
+          echo "PATH=$bin/share/monad:$PATH" >> "$GITHUB_ENV"
+          # The bare compiler finds init/std/llvm/runtime here.
+          echo "MONAD_ROOT=$src" >> "$GITHUB_ENV"
+          echo "MONAD_HOME=$HOME/.monad" >> "$GITHUB_ENV"
+          test "$("$bin/share/monad/monad" version | head -1 | awk '{print $1}')" = "${pin:0:7}"
 
       - name: Fetch pinned motes
         run: |

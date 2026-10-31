@@ -1,22 +1,24 @@
-#![mote { name := "start", deps := [init, std] }]
-
 // Rebuild the browser SPA and the hash-pinned loader, build the backend, and
-// run it. This replaces the old `start.sh`; run it from the repository root:
+// run it. The workspace root's mote.toml declares this file as
+// `[[script]] name = "start"`, so run it from the repository root:
 //
-//   monad run start.mo
-//   monad run start.mo -- --port 3000
+//   monad script start
+//   monad script start -- --port 3000      # `monad s start` is the alias
 //
-// It needs the same toolchain as any other build (llc/clang/wasi-sdk/Boehm GC
-// on PATH -- see README.md). Every step runs with `exec_cmd`, which inherits
-// this process's stdio and process group: build output streams live, and the
-// server keeps the terminal. A failed step stops the script with its exit
-// status; the final server's status is what `monad run` returns.
+// The file carries no `#![mote { ... }]` annotation of its own: it uses only
+// `init` and `std`, which the compiler resolves from its toolchain (the Nix
+// build sets MONAD_ROOT to the pinned source tree). It needs the same
+// toolchain as any other build (llc/clang/wasi-sdk/Boehm GC on PATH -- see
+// README.md). Every step runs with `exec_cmd`, which inherits this process's
+// stdio and process group: build output streams live, and the server keeps
+// the terminal. A failed step stops the script with its exit status; the
+// final server's status is what `monad script` returns.
 //
 // The server is started under `setpriv --pdeathsig TERM` when available, so
 // the kernel terminates it if this script dies unexpectedly -- the listener
 // and its port are released rather than left to an orphan. Without setpriv
 // the shell execs the server directly; Ctrl-C (or killing the process group)
-// still stops both. Killing only the `monad run` parent is outside the
+// still stops both. Killing only the `monad script` parent is outside the
 // script's control; kill the group in that case.
 
 use std::io {
