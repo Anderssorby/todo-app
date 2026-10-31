@@ -115,8 +115,8 @@ that is a backend change, not a manifest change.
   the first response is dropped. Clicking a few controls quickly is fine in
   practice, but a queue is the real fix.
 - The shell starts with `GET /api/me`: a 401 shows a sign-in view and clears
-  the cached list, so a production deployment without OAuth enabled is a
-  closed app (see below).
+  the cached list, so a production deployment without a working ATproto
+  sign-in is a closed app (see below).
 - Every re-render parses Markdown for every note, and the wasm bump allocator
   never frees. Hundreds of long notes can exhaust the browser heap; keep
   notes/lists modest until the renderer is cached or the runtime reclaims
@@ -138,13 +138,18 @@ that is a backend change, not a manifest change.
   uses shell builtins; coreutils is there for debugging and for the
   documented initContainer fallback (`chown`/`chmod`). Verify with
   `docker run --rm --entrypoint /bin/sh todo-app:latest -c id`.
-- **Sign-in is deferred in this build.** The pinned `oauth` mote implements
-  the authorization-code + PKCE client flow but cannot validate an ID token
-  (no JWT/JWKS/signature verification), so `/auth/login` and
-  `/auth/callback` return 503 and `GET /api/me` is 401 for every request.
-  `TODO_DEV_AUTH`/`--dev-auth` is a **local development stub**: it must never
-  be set in this manifest or the image. The production login flow and its
-  OAuth env/Secret come back when the mote can verify tokens.
+- **Sign-in is deferred on ATproto's DPoP requirement.** The pinned Monad now
+  ships `jsonwebtoken` and an `oauth` client that validates tokens (and Monad
+  main has a resource-server bearer guard, not yet in this nightly), but this
+  app targets AT Protocol OAuth, which requires DPoP (RFC 9449): every
+  authorization-server/PDS request needs an ES256 proof signed by a
+  per-session P-256 key. Monad's `crypto` mote only verifies signatures and
+  cannot yet generate a key or sign, so `/auth/login` and `/auth/callback`
+  return 503 and `GET /api/me` is 401 for every request. `TODO_DEV_AUTH`/
+  `--dev-auth` is a **local development stub**: it must never be set in this
+  manifest or the image. The production login flow and its OAuth env/Secret
+  come back when Monad can generate a P-256 key and sign DPoP proofs (tracked
+  in `monad-plans/library-ideas/crypto-primitives.md`).
 - **There are no sessions or CSRF tokens yet.** Authentication is the dev
   stub only, so the workspace is effectively closed in production. Treat the
   deployed app as read-only-until-configured, and do not expose the dev stub.

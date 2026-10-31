@@ -3,11 +3,10 @@
 # time/due formatting (`stamp.mo`), the Markdown renderer (`notes.mo`), and
 # the oak view.
 #
-# Workspace-dependency note (re-tested at 6a59e090, 2026-10-30): a
-# `workspace = true` path dep no longer hangs but still does not load its
-# submodules, and an inherited git dep writes an empty lock. The sources stay
-# explicit here; the canonical copy also lives in the root
-# `[workspace.dependencies]` for the future full conversion.
+# Every dependency inherits the workspace root's `[workspace.dependencies]`
+# (`workspace = true`), so this file no longer repeats the Monad revision.
+# The workspace root's `mote.lock` is the one committed lock for all four
+# members.
 #
 # The mote name is `todo_core` (an underscore) because a `use` head must be
 # an identifier; the directory keeps the repo's hyphenated spelling like
@@ -21,51 +20,35 @@ edition = "2026"
 path = "src/lib.mo"
 
 [dependencies.init]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "init"
+workspace = true
 
 [dependencies.std]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "std"
+workspace = true
 
 [dependencies.json]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/json"
+workspace = true
 
 [dependencies.oak]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/oak"
+workspace = true
 
 [dependencies.xml_html]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/xml_html"
+workspace = true
 
 # UTC ISO-8601 parsing/calendar conversion for the shared timestamp and
 # due-date formatting. `parsec` is direct because `Stamp` matches
 # `Date.parse_iso`'s `ParseResult` (a type from that mote, so a transitive
 # dependency will not do).
 [dependencies.time]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/time"
+workspace = true
 
 [dependencies.parsec]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/parsec"
+workspace = true
 
 # Markdown notes, rendered with the mote's safe defaults (raw HTML escaped,
 # javascript:/vbscript:/file: URLs dropped). Pure and wasm-portable, so the
 # native SSR view and the browser shell share one renderer.
 [dependencies.markdown]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/markdown"
+workspace = true
 
 [affine]
 mode = "warn"

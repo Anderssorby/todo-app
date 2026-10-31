@@ -1,11 +1,10 @@
 # The native backend: moon HTTP server, SQLite persistence, users/sessions
 # and the SSR/oak pages.
 #
-# Workspace-dependency note (re-tested at 6a59e090, 2026-10-30): a
-# `workspace = true` path dep no longer hangs but still does not load its
-# submodules, and an inherited git dep writes an empty lock, so every source
-# stays explicit here. The canonical copy lives in
-# the root `[workspace.dependencies]` for the future full conversion.
+# Every dependency inherits the workspace root's `[workspace.dependencies]`
+# (`workspace = true`), so this file no longer repeats the Monad revision.
+# The root-relative `todo_core` path is inherited the same way; the workspace
+# root's `mote.lock` is the one committed lock for all four members.
 #
 # The `sql`/`sqlite` driver is `#[extern "c"]`/compiled-backend-only, so it
 # is a backend dependency and never `todo-core` (which is also compiled for
@@ -23,47 +22,31 @@ name = "todo-backend"
 path = "src/main.mo"
 
 [dependencies.std]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "std"
+workspace = true
 
 [dependencies.json]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/json"
+workspace = true
 
 [dependencies.todo_core]
-path = "../todo-core"
+workspace = true
 
 [dependencies.moon]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/moon"
+workspace = true
 
 [dependencies.http]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/http"
+workspace = true
 
 [dependencies.log]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/log"
+workspace = true
 
 [dependencies.clap]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/clap"
+workspace = true
 
 [dependencies.sql]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/sql"
+workspace = true
 
 [dependencies.sqlite]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/sqlite"
+workspace = true
 
 [affine]
 mode = "warn"

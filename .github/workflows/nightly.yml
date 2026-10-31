@@ -97,6 +97,8 @@ jobs:
       - name: Check and test
         run: |
           monad check --workspace --locked
+          # `--workspace` expands the members but not the root script module.
+          monad check start.mo
           # Directory arguments deliberately, not --workspace: the SPA is a
           # web-only target with no native tests.
           monad test --locked todo-core/src todo-backend/src todo-webgen/src

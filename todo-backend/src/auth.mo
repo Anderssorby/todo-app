@@ -1,15 +1,19 @@
 /// Authentication context and the development-only sign-in stub.
 ///
-/// Production sign-in is generic OAuth2/OIDC through the `oauth` mote, which
-/// is present at the pinned Monad revision but is Phase 0-1: it implements the
-/// authorization-code + PKCE client flow, discovery and token exchange, but
-/// it has no JWT/JWKS parser and never validates an ID token (signature,
-/// issuer, audience, expiry, nonce). Accepting that token would authenticate
-/// nothing, so production sign-in is deliberately deferred and this module
-/// provides only the request context plus a clearly gated dev path:
-/// `TODO_DEV_AUTH=1` (or `--dev-auth`) resolves a local `dev` user and no
-/// session cookie. The dev path is never enabled in the image/Kubernetes
-/// manifest, and it is removed when the validated OIDC flow lands.
+/// Production sign-in is AT Protocol OAuth (public client, identity-only
+/// `atproto` scope). The pinned Monad now ships `jsonwebtoken` and an `oauth`
+/// client that validates tokens, and Monad main also has a resource-server
+/// bearer guard, so the old "cannot validate an ID token" blocker is closed.
+/// ATproto's remaining requirement is DPoP (RFC 9449): each session must
+/// generate a P-256 key and sign an ES256 proof for every authorization-server
+/// and PDS request. Monad's `crypto` mote currently only verifies ES256; it
+/// cannot generate a key or sign, so production sign-in is deliberately
+/// deferred and this module provides only the request context plus a clearly
+/// gated dev path: `TODO_DEV_AUTH=1` (or `--dev-auth`) resolves a local `dev`
+/// user and no session cookie. The dev path is never enabled in the
+/// image/Kubernetes manifest, and it is removed when the ATproto DPoP flow
+/// lands. The missing crypto capability is tracked in
+/// `monad-plans/library-ideas/crypto-primitives.md`.
 ///
 /// The workspace is shared; `Context.user` is the actor used for
 /// attribution, not an ownership filter.

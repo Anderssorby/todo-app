@@ -4,12 +4,10 @@
 # externs); availability is enforced per extern at codegen, same as
 # `web_wasm`/`oak_wasm` themselves, so `monad check` still runs everywhere.
 #
-# Workspace-dependency note (re-tested at 6a59e090, 2026-10-30): the pinned
-# compiler's `workspace = true`
-# inheritance does not load a dependency's submodules (`todo_core::storage`
-# is unresolved) and does not inherit git deps, so every source stays
-# explicit here. The canonical copy lives in the root
-# `[workspace.dependencies]` for the future full conversion.
+# Every dependency inherits the workspace root's `[workspace.dependencies]`
+# (`workspace = true`), including the root-relative `todo_core` path. The
+# workspace root's `mote.lock` is the one committed lock for all four
+# members.
 #
 # `[lib]` is the root for the component modules under `src/components/`;
 # `[bin]` stays the wasm entry.
@@ -27,57 +25,39 @@ name = "todo-spa"
 path = "src/main.mo"
 
 [dependencies.init]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "init"
+workspace = true
 
 [dependencies.std]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "std"
+workspace = true
 
 [dependencies.todo_core]
-path = "../todo-core"
+workspace = true
 
 [dependencies.oak]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/oak"
+workspace = true
 
 [dependencies.oak_wasm]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/oak_wasm"
+workspace = true
 
 [dependencies.web_wasm]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/web_wasm"
+workspace = true
 
 # The pure event snapshot the drop handler reads (`WebEvent.data`).
 [dependencies.web_event]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/web_event"
+workspace = true
 
-# The typed-event ABI's C half (`web_event_*`, `dom_add_listener_global`)
-# is pinned to the same Monad revision as the other motes; the installed
-# nightly predates it. The manifest tier is how an external mote points the
-# link at the pinned runtime instead of the toolchain's copy.
+# The typed-event ABI's C half (`web_event_*`, `dom_add_listener_global`) is
+# pinned to the same Monad revision as the other motes. The manifest tier is
+# how an external mote points the link at the pinned runtime instead of the
+# toolchain's copy.
 [dependencies.runtime]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "runtime"
+workspace = true
 
 [dependencies.xml_html]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/xml_html"
+workspace = true
 
 [dependencies.json]
-git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
-subdir = "motes/json"
+workspace = true
 
 # NOT `log` (motes/log): `Logger.log`'s `json_lines` match arm calls
 # `Json.to_string`, which reaches the web-gated `F64.to_string` -- this

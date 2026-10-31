@@ -1,17 +1,15 @@
 # Virtual workspace root for the todo-app repository: no [mote] of its
 # own, just the member list and the shared dependency sources.
 #
-# `[workspace.dependencies]` below is the canonical source list. The pinned
-# compiler's `workspace = true` inheritance cannot be used by the members
-# yet (re-tested at 6a59e090, 2026-10-30): a path dependency no longer hangs,
-# but it resolves the dependency ROOT without its submodules
-# (`Todo`/`Status`/`Stamp.*` are unknown in the SPA), and an inherited git
-# dependency writes an empty `mote.lock` (0 entries). The members therefore
-# keep explicit sources; this table is the one copy to switch them to when
-# that lands.
+# `[workspace.dependencies]` below is the single source of truth: every
+# member declares `workspace = true` and inherits from it, including the
+# root-relative `todo_core` path. The compiler resolves inheritance at
+# a4d8fde7 (PR #149), and `monad fetch` writes ONE root `mote.lock` for the
+# whole workspace (the per-member locks are gone).
 # The Monad motes are pinned to the same public revision in every source,
-# and every build/check/test runs `--locked` (the per-member `mote.lock`
-# files are committed).
+# and every build/check/test runs `--locked`. The root lock is committed;
+# each member's `mote.lock` is a committed symlink to it (the per-member
+# verify path still reads `<member>/mote.lock`; see README.md and PLAN.md).
 #
 # Sub-table headers, not inline tables: both readers accept either, but
 # this is the Monad corpus's house style and the form the rest of this
@@ -27,100 +25,100 @@ members = [
 
 [workspace.dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "init"
 
 [workspace.dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "std"
 
 [workspace.dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/json"
 
 [workspace.dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/oak"
 
 [workspace.dependencies.xml_html]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/xml_html"
 
 # Shared timestamp/due-date formatting (`todo-core/src/stamp.mo`).
 [workspace.dependencies.time]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/time"
 
 [workspace.dependencies.parsec]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/parsec"
 
 # Markdown notes, shared by the SSR view and the wasm shell.
 [workspace.dependencies.markdown]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/markdown"
 
 [workspace.dependencies.moon]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/moon"
 
 [workspace.dependencies.http]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/http"
 
 [workspace.dependencies.log]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/log"
 
 [workspace.dependencies.clap]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/clap"
 
 [workspace.dependencies.sql]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/sql"
 
 [workspace.dependencies.sqlite]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/sqlite"
 
 [workspace.dependencies.jsgen]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/jsgen"
 
 [workspace.dependencies.oak_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/oak_wasm"
 
 [workspace.dependencies.web_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/web_wasm"
 
 [workspace.dependencies.web_event]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "motes/web_event"
 
 # The typed-event ABI's C half, linked into the wasm build.
 [workspace.dependencies.runtime]
 git = "https://github.com/monad-lang/monad.git"
-rev = "6a59e0909cbc35ba1607061f7926d4347baf6f31"
+rev = "a4d8fde74d2e4148c424b336b87624133f08cba6"
 subdir = "runtime"
 
 # The intra-repo shared core (path relative to this workspace root).

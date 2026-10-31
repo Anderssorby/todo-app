@@ -37,17 +37,22 @@ found (see [`PLAN.md`](PLAN.md) and the Monad plans repo).
   git dependencies) and the OCI image.
 - `deploy/` — the container entrypoint, Kubernetes manifests, and deployment
   notes.
+- `start.mo` — rebuilds the SPA, the hash-pinned loader and the backend, then
+  runs the backend with forwarded argv (`monad run start.mo`).
 - `scripts/fetch-deps.sh` — the one-time network step that resolves the
-  pinned Monad git dependencies and writes each member's `mote.lock`.
+  pinned Monad git dependencies and writes the workspace's root `mote.lock`.
 
 ## Dependencies
 
 The Monad motes are pinned to the public
 `https://github.com/monad-lang/monad.git` repository at
-`6a59e0909cbc35ba1607061f7926d4347baf6f31` (see each `mote.toml`). The
-workspace root is virtual, so there is no root lock: `todo-core`,
-`todo-backend`, `todo-spa` and `todo-webgen` each carry their own committed
-`mote.lock`. After cloning or changing a manifest, run the only network step:
+`a4d8fde74d2e4148c424b336b87624133f08cba6` in the root `mote.toml`; every
+member inherits those sources with `workspace = true`. `monad fetch` writes
+one root `mote.lock` for the whole workspace. The four member `mote.lock`
+files are committed symlinks to it, because the per-member `--locked` verify
+path still reads `<member>/mote.lock` instead of the workspace root's (see
+`PLAN.md`, `workspace-member-lock-lookup`). After cloning or changing a
+manifest, run the only network step:
 
 ```bash
 scripts/fetch-deps.sh
@@ -69,10 +74,10 @@ switch with:
 
 ```bash
 monadup list          # * marks the active toolchain
-monadup use nightly-2026-10-30-6a59e090
+monadup use nightly-2026-10-30-a4d8fde7
 ```
 
-The repo pins `6a59e090` (the latest nightly at the time of writing), so
+The repo pins `a4d8fde7` (the latest nightly at the time of writing), so
 `monadup default` on that nightly is consistent. `scripts/check-toolchain.sh` compares `monad version`
 with the pinned revision and fails with the matching `monadup use` command;
 the nightly workflow runs it before fetching or building. Filed as
@@ -98,6 +103,20 @@ monad build --locked todo-backend
 ./target/debug/todo-backend --help
 monad test --workspace --locked
 ```
+
+Or rebuild everything and run it in one command, from the repository root:
+
+```bash
+monad run start.mo                  # builds SPA + loader + backend, then serves
+monad run start.mo -- --port 3000   # flag-like program args need `--`
+```
+
+`start.mo` is a Monad script module (`#![mote { … }]`), not a shell script; it
+runs the three builds with inherited stdio, then the backend, and returns its
+exit status. The server runs under `setpriv --pdeathsig TERM` when util-linux
+is available, so terminating the script also terminates the server and
+releases the listening port; without `setpriv`, Ctrl-C (or killing the process
+group) stops both.
 
 WASM:
 
@@ -196,17 +215,22 @@ SHA-256 of `boot.js`; the backend reads it (`Persist.loader_version`) and
 emits `/web/boot.js?v=<hash>` in the SSR shell, while `web/index.html`
 fetches the same file. `node web/boot_url.test.mjs` recomputes every hash.
 Run `todo-webgen` after building the SPA wasm and before starting the
-backend; `start.sh` does both. This forces fresh URLs, so a browser's cached
-failed module cannot poison the page.
+backend; `monad run start.mo` does both. This forces fresh URLs, so a
+browser's cached failed module cannot poison the page.
 
 ## Users, time and notes
 
-**Sign-in is deferred.** The pinned Monad revision now ships the `oauth`
-mote, but it is Phase 0-1: it implements authorization-code + PKCE,
-discovery and token exchange, yet it has no JWT/JWKS parser and never
-validates an ID token (issuer, audience, expiry, nonce, signature). Accepting
-that token would authenticate nothing, so `/auth/login` and
-`/auth/callback` return 503 with that explanation. The only sign-in is the
+**Sign-in is deferred on ATproto's DPoP requirement.** The pinned Monad now
+ships `jsonwebtoken` and an `oauth` client that validates tokens (and, on
+main but not yet in this nightly, a resource-server bearer guard), so the old
+"cannot validate an ID token" blocker is closed. This app targets AT Protocol
+OAuth as a public client with the identity-only `atproto` scope. ATproto
+requires DPoP (RFC 9449): each session must generate a P-256 key and sign an
+ES256 proof for every authorization-server and PDS request. Monad's `crypto`
+mote currently only verifies ES256; it cannot generate a key or sign. So
+`/auth/login` and `/auth/callback` return 503 with that explanation. The
+capability is planned in
+`monad-plans/library-ideas/crypto-primitives.md`. The only sign-in is the
 gated local stub: start the server with `TODO_DEV_AUTH=1` (or `--dev-auth`)
 to resolve a local `dev` user. It is off by default and never enabled in the
 image or Kubernetes manifest. `GET /api/me` returns 401 in production and
@@ -235,9 +259,9 @@ view module miscompiled `View.fragment_html` into a segfault (see `PLAN.md`).
 
 **JSON.** The native backend uses the same hand-written, wasm-safe codec as
 the SPA (`codec_web.mo`); `codec.mo` only re-exports/wraps it. The
-serde-derived DTOs were removed because the pinned compiler's checker
-exhausts memory (≈18 GB) when a test binary includes a serde-derived module,
-which made `monad test` and CI impossible (see `PLAN.md`).
+serde-derived DTOs were removed because the compiler at `6a59e090` exhausted
+memory (≈18 GB) when a test binary included a serde-derived module, which
+made `monad test` and CI impossible (see `PLAN.md`).
 
 **Known browser limit.** The SPA re-renders the whole list on every tick, and
 the wasm bump allocator never reclaims memory. Rendering Markdown for
@@ -261,6 +285,7 @@ docker run --rm -p 8095:8095 -v todo-state:/state todo-app:latest
 ```
 
 The image runs the server with `WORKDIR=/app` and keeps state in the mounted
-`/state` volume via `/app/todos.json -> /state/todos.json`. See
+`/state` volume: `/app/entrypoint.sh` passes `--db /state/todos.db`, so the
+SQLite database and its WAL/SHM files live there. See
 [`deploy/README.md`](deploy/README.md) for registry/kind loading, the
 Kubernetes manifests, probes, and the single-replica and file-state caveats.
