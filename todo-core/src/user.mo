@@ -36,10 +36,22 @@ pub struct OidcIdentity {
   picture : Option String
 }
 
+/// The short-lived login-flow row. The first five fields are the generic
+/// OAuth2/OIDC shape; the ATproto fields carry what the callback needs to
+/// finish a DPoP login: the authorization-server `issuer`, the account's
+/// PDS origin, the DID the user is signing in as, the display handle, and
+/// the halves of the per-login P-256 DPoP key (base64url, dropped with the
+/// row). `nonce` holds the AS's latest `DPoP-Nonce` in the ATproto flow.
 pub struct OauthState {
   state : String,
   nonce : String,
   code_verifier : String,
   redirect_to : Option String,
-  expires_at : String
+  expires_at : String,
+  issuer : String := "",
+  pds : String := "",
+  did : String := "",
+  handle : Option String := Option.none,
+  dpop_priv : String := "",
+  dpop_pub : String := ""
 }

@@ -8,17 +8,21 @@ use lib::handlers {
   Handlers.api_list, Handlers.api_me, Handlers.api_set_status,
   Handlers.api_toggle, Handlers.api_toggle_subtask, Handlers.api_update_me,
   Handlers.auth_callback,
-  Handlers.auth_login, Handlers.auth_logout, Handlers.clear_completed,
+  Handlers.auth_login, Handlers.auth_logout, Handlers.client_metadata,
+  Handlers.clear_completed,
   Handlers.create, Handlers.delete, Handlers.delete_subtask, Handlers.edit,
   Handlers.edit_task_page, Handlers.index, Handlers.kanban_page,
   Handlers.login_page, Handlers.new_task_page, Handlers.not_found,
   Handlers.set_status, Handlers.toggle, Handlers.toggle_subtask
 }
 use lib::auth {Auth.require, Config, Context}
+use lib::atproto {AtprotoConfig, Atproto.default_plc_base, Atproto.default_resolver_base}
 use lib::db {Db.prepare, Store}
 use lib::logging {App.logger, App.request_logging}
 use lib::serve {Serve.run}
 use log::logger {Logger.error, Logger.info}
+use oauth::http_client {OauthHttp.real}
+use http::uri {Uri.percent_encode}
 use clap::spec {
   Cli.CommandSpec, Cli.Parsed, Cli.command, Cli.flag, Cli.flag_set,
   Cli.option_default, Cli.option_i64_default, Cli.option_value,
@@ -55,8 +59,11 @@ def App.routes (auth : Config) : List Route :=
   [
     Router.get "/login" (fn (req : Request) => Handlers.login_page auth req),
     Router.get "/auth/login" (fn (req : Request) => Handlers.auth_login auth req),
+    Router.post "/auth/login" (fn (req : Request) => Handlers.auth_login auth req),
     Router.get "/auth/callback" (fn (req : Request) => Handlers.auth_callback auth req),
     Router.post "/auth/logout" (fn (req : Request) => Handlers.auth_logout auth req),
+    Router.get "/client-metadata.json"
+      (fn (req : Request) => Handlers.client_metadata auth req),
     Router.get "/api/me" (fn (req : Request) => Handlers.api_me auth req),
     Router.post "/api/me" (App.protected auth Handlers.api_update_me),
     Router.get "/" (App.protected auth Handlers.index),
@@ -97,13 +104,39 @@ def App.listen_address (host : String) (port : U16) : String :=
 def App.default_port : String := "8095"
 def App.default_db : String := "todos.db"
 
+/// The default public URL of this server, as seen by the ATproto
+/// authorization server on callback.
+def App.default_redirect_uri : String :=
+  "http://localhost:8095/auth/callback"
+
+/// The default client id is the ATproto loopback development shape: the
+/// client_id URL itself carries the redirect_uri and scope as query
+/// parameters, so no client registration exists. A deployment with a real
+/// origin passes `--auth-client-id https://<host>/client-metadata.json`.
+pub def App.dev_client_id (redirect_uri : String) (scope : String) : String :=
+  String.concat_list [
+    "http://localhost?redirect_uri=", Uri.percent_encode redirect_uri,
+    "&scope=", Uri.percent_encode scope
+  ]
+
 def App.cli_spec : Cli.CommandSpec :=
   Cli.with_args
     [ Cli.option_i64_default "port" "p" "PORT" App.default_port
         "the TCP port to listen on",
       Cli.option_default "db" "d" "PATH" App.default_db
         "the SQLite database file",
-      Cli.flag "dev-auth" "" "enable the development-only sign-in stub" ]
+      Cli.flag "dev-auth" "" "enable the development-only sign-in stub",
+      Cli.option_default "auth-redirect-uri" "" "URL" App.default_redirect_uri
+        "the OAuth callback URL (must be registered as a client redirect_uri)",
+      Cli.option_default "auth-client-id" "" "ID" ""
+        "the ATproto client id (default: the loopback development client)",
+      Cli.option_default "auth-scope" "" "SCOPE" "atproto"
+        "the OAuth scope to request",
+      Cli.option_default "auth-resolver" "" "URL" Atproto.default_resolver_base
+        "the base URL for handle resolution",
+      Cli.option_default "auth-plc" "" "URL" Atproto.default_plc_base
+        "the plc.directory base URL for did:plc documents"
+    ]
     (Cli.command "todo-backend" "A todo list web app server")
 
 def App.port_in_range (n : I64) : Bool :=
@@ -112,7 +145,12 @@ def App.port_in_range (n : I64) : Bool :=
 struct App.Options {
   port : I64,
   db : String,
-  dev_auth : Bool
+  dev_auth : Bool,
+  auth_redirect_uri : String,
+  auth_client_id : String,
+  auth_scope : String,
+  auth_resolver : String,
+  auth_plc : String
 }
 
 // `clap` validates `--port`/`-p` is a well-formed integer at parse time
@@ -130,7 +168,25 @@ def App.decode_cli (env_dev : Bool) (p : Cli.Parsed) : Result String App.Options
       Result.err e => Result.err ("invalid database path: " ++ e),
       Result.ok _ =>
         let dev : Bool := env_dev || Cli.flag_set "dev-auth" p in
-        let opts : App.Options := { port := port, db := db, dev_auth := dev } in
+        let redirect : String :=
+          Option.get_or_default App.default_redirect_uri
+            (Cli.option_value "auth-redirect-uri" p) in
+        let scope : String :=
+          Option.get_or_default "atproto" (Cli.option_value "auth-scope" p) in
+        let client_id : String :=
+          match Cli.option_value "auth-client-id" p {
+            Option.some id => id,
+            Option.none => App.dev_client_id redirect scope,
+          } in
+        let resolver : String :=
+          Option.get_or_default Atproto.default_resolver_base
+            (Cli.option_value "auth-resolver" p) in
+        let plc : String :=
+          Option.get_or_default Atproto.default_plc_base
+            (Cli.option_value "auth-plc" p) in
+        let opts : App.Options := { port := port, db := db, dev_auth := dev,
+          auth_redirect_uri := redirect, auth_client_id := client_id,
+          auth_scope := scope, auth_resolver := resolver, auth_plc := plc } in
         Result.ok opts,
     }
   else Result.err "port must be between 0 and 65535"
@@ -194,9 +250,27 @@ def App.serve (config : ServerConfig) (auth : Config) : IO I64 := do {
   }
 }
 
+/// The ATproto client configuration derived from the CLI options. The
+/// transport is the real one (moose, zero redirects); tests inject the
+/// scripted one.
+def App.atproto_config (opts : App.Options) : AtprotoConfig :=
+  let cfg : AtprotoConfig := {
+    http := OauthHttp.real,
+    client_id := opts.auth_client_id,
+    redirect_uri := opts.auth_redirect_uri,
+    scope := opts.auth_scope,
+    resolver_base := opts.auth_resolver,
+    plc_base := opts.auth_plc
+  } in
+  cfg
+
 def App.start (config : ServerConfig) (opts : App.Options) (store : Store) : IO I64 := do {
   let _ <- Logger.info App.logger ("database ready: " ++ opts.db);
-  let auth : Config := { store := store, dev_auth := opts.dev_auth };
+  let _ <- Logger.info App.logger
+    ("auth: client_id=" ++ opts.auth_client_id
+      ++ " redirect_uri=" ++ opts.auth_redirect_uri);
+  let auth : Config := { store := store, dev_auth := opts.dev_auth,
+                         atproto := App.atproto_config opts };
   App.serve config auth
 }
 

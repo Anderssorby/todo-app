@@ -1112,6 +1112,12 @@ fallback use. The Nix image build is unaffected (one nixpkgs throughout).
   P-256 key and ES256 DPoP proofs (RFC 9449); `motes/crypto` verifies
   signatures but cannot generate a key or sign. Tracked in
   `monad-plans/library-ideas/crypto-primitives.md` (new signing phase).
+  **Worked around app-locally at `d6238985`**: `todo-backend/src/dpop.mo`
+  is a thin OpenSSL 3 FFI seam (EC_KEY generate, raw `r||s` ES256 sign,
+  base64url JWK/JKT) with the same module boundary the crypto mote's
+  signing phase will have. When `motes/crypto` grows
+  `Crypto.es256_keygen`/`es256_sign`, `dpop.mo` shrinks to a `use`-line
+  change and the seam contract below is the checklist.
 - `workspace-member-lock-lookup` — `Build.verify_home` reads
   `<member>/mote.lock` instead of the workspace root's one lock, so a member
   built with inherited dependencies fails `--locked` unless a per-member lock
@@ -1192,6 +1198,100 @@ Gap recorded:
   app-local loop stands in until then; re-test this before adopting a newer
   moon.
 
+## ATproto OAuth sign-in, DPoP seam, pin d6238985 (2026-11-02)
+
+The pin moved to Monad main `d62389855e0f8c561d91197372150c778f9bff38`
+(nightly gate: `ci: run the nightly gate strict when the floor is
+unresolvable`) — flake, devenv, `mote.toml` members and the workspace
+lock all moved together, as always.
+
+The user system now has its production login: AT Protocol OAuth as a
+public client (`atproto` scope only, PKCE S256, RFC 9126 PAR, RFC 9449
+DPoP with ES256). The flow: handle or DID -> DID document -> PDS ->
+`oauth-protected-resource` -> authorization server (RFC 8414) -> PAR (with
+the DPoP JKT so tokens bind to this login's key) -> 302 -> callback ->
+token exchange -> `com.atproto.server.getSession` on the PDS -> app
+session cookie.
+
+Design review, settled points:
+
+- **Reuse, not fork.** The flow is built on the pinned `oauth` mote's
+  own `OauthHttp` (the scriptable transport that also fakes sockets in
+  tests), `Pkce` and `OauthError`. Only what the OIDC-shaped mote cannot
+  express lives in app code: `atproto.mo` (the protocol flow) and
+  `dpop.mo` (the key/sign seam). No `motes/oauth` source was copied.
+- **OIDC was rejected on shape, not effort.** ATproto authorization
+  servers issue no ID tokens and expect PAR + DPoP, so the mote's
+  `Discovery`/`Login` classes have no path through this flow. The
+  identity-only `atproto` scope means no profile claims exist to
+  validate; identity IS the DID.
+- **PAR + DPoP are app-local.** The mote has neither, and both are
+  ATproto-mandatory, so `atproto.mo` implements them against `OauthHttp`
+  with the mote's `OauthError` strings. When upstream grows them, the
+  test fixtures (`OauthHttp.fake` scripts) move over unchanged.
+- **Security review of the callback.** `iss` must equal the AS metadata
+  origin (RFC 8414 §5; ATproto's `same_origin` enforcement), the token
+  `sub` must equal the DID resolved before the redirect (the state row's
+  `did`), `token_type` must be `DPoP`, the `atproto` scope must survive
+  the grant, and the PDS session call re-confirms the same DID through
+  the DPoP-bound access token with an `ath` claim. The one-time state
+  row is deleted on read and expires after 10 minutes; the cookie is a
+  raw CSPRNG token stored only as its SHA-256 hex digest, HttpOnly,
+  SameSite=Lax, Secure when the redirect origin is https. ATproto
+  tokens (access or refresh) are never persisted and never sent to the
+  browser; refresh tokens are dropped, so sessions last the cookie's
+  30 days and re-login is a clean re-entry.
+- **Multi-AS shape.** One login = one authorization server (per-PDS
+  discovery), so no global AS state exists; the oauth_states row records
+  its own `issuer`, and users are keyed `(issuer, subject)` like the
+  OIDC path (`Db.find_or_create_user`). The client document
+  (`/client-metadata.json`) sets `dpop_bound_access_tokens: true` and
+  `token_endpoint_auth_method: none` — the public-client shape.
+
+DPoP seam contract (`dpop.mo`, to delete when crypto grows signing):
+
+- `Dpop.generate : IO (Result String DpopKey)` — a P-256 pair, base64url
+  `priv_b64`/`pub_b64`; must stay CSPRNG-backed.
+- `Dpop.jkt : DpopKey -> Result String String` — RFC 7638 thumbprint of
+  the JWK, base64url — the PAR `dpop_jkt`.
+- `Dpop.proof … : IO (Result String String)` — ES256 over the DPoP
+  claims with the raw `r||s` signature, base64url; `nonce`/`ath` optional
+  claims; the JOSE header pins `typ: dpop+jwt`, `alg: ES256`, and the
+  key's own JWK.
+- The FFI surface (OpenSSL 3 `EC_KEY_*`/`EVP_*`) is backend-only; the
+  WASM targets never link it. Tests assert the JWK/JKT shapes purely
+  and the FFI paths only execute on the native driver.
+- **FFI partitioning (hard rule while this file exists):** monad lowers
+  every `#[extern "c"]]` to a raw LLVM `declare` keyed by link name with
+  no dedup, so two modules whose extern sets overlap fail at `llc` with
+  `invalid redefinition of ...`. `motes/crypto`'s own ffi.mo declares 15
+  of the same OpenSSL symbols, so **no backend module may `use crypto::`
+  while `dpop.mo`'s externs exist** (dpop.mo deliberately imports
+  nothing from crypto; its verify helper uses only `ECDSA_*` symbols
+  absent from crypto's list). `todo-backend/mote.toml` therefore links
+  `libs = ["crypto"]`, `pkg-config = ["openssl"]` directly — the link
+  flags fire from the app's own mote instead of a crypto import's.
+
+Verification at `d6238985` (2026-11-03, pinned toolchain — a mid-session
+`monadup` self-update to the 11-03 nightly had to be backed out via
+`scripts/check-toolchain.sh`'s rule first; see the gap entry below):
+`monad check --workspace --locked` — 25 files, 0 errors, 267 warnings;
+`monad test --workspace --locked` — 105/105 (action 19, codec 11,
+codec_web 2, kernel 3, storage 16, view 24, atproto 4, dpop 8, form 9,
+db 2, main 1, webgen 6; the atproto suite drives the whole flow against
+`OauthHttp.fake` and the dpop suite exercises the OpenSSL FFI seam);
+native builds of todo-backend, todo-spa (wasm32, hash-pinned loader via
+todo-webgen) and todo-webgen; `web/boot_url.test.mjs`,
+`web/runtime_args.test.mjs`, `web/smoke.mjs` and its `SMOKE_UNAUTH`
+variant, and `web/keepalive.test.mjs` (24 idle keep-alive sockets held,
+a fresh connection still served). Finally `web/auth-smoke.mjs`: the
+built backend booted against a local stub resolver/PDS/authorization
+server whose Node-side verifier checks every DPoP proof with its own
+ES256 — an implementation that is not OpenSSL — covering PAR with
+`dpop_jkt`, the 302 with the request_uri, the callback token exchange,
+PDS session confirmation, the HttpOnly `todo_session` cookie, `/api/me`
+and logout. All green.
+
 ## Gap-Logging Workflow (continuous, not deferred)
 
 After every `monad check`/`build`/`test`, wasm build/run, and curl check:
@@ -1208,7 +1308,8 @@ Current gap entries from this app:
 `struct-field-access-as-if-cond-segfaults-nonzero-index`,
 `monad-test-no-path-globs-unrelated-dot-mo-files`,
 `json-to-string-web-gate`,
-and `compiler-mote-revision-skew-is-not-diagnosed`.
+`compiler-mote-revision-skew-is-not-diagnosed`,
+and `check-accepts-what-elaborate-rejects`.
 
 **Found 2026-10-29, cause known** —
 `compiler-mote-revision-skew-is-not-diagnosed`: a compiler built from
@@ -1239,6 +1340,36 @@ the compiler's revision with the pinned `std`/`runtime` and reject the
 build with a clear diagnostic — a native-ABI mismatch must never reach
 codegen, and `monad test`/`monad build` must not emit a binary that
 crashes on the first `ByteBuf` use.
+
+**Found 2026-11-03, cause known** —
+`check-accepts-what-elaborate-rejects`: `Auth.begin_login` had four match
+arms of the shape `Result.err e => return (Auth.login_failed_logged e)`
+where `login_failed_logged : String -> IO Response` already, so each arm
+elaborated to `IO (IO Response)` inside a do-block typed `IO Response`.
+`monad check --workspace --locked` accepted the decl (0 errors); only
+`monad build`'s `compile_loaded_modules_to_ir` elaborate gate rejected
+it, and its diagnostic pointed at the wrong subterm — the NEXT match,
+printed as `expected (Result String String), found (prelude::Result
+String String)` — while the double-wrap sat two binds earlier on the
+`Result String AtprotoIdentity` match. Found by stub-and-extend
+bisection of the decl's body: shortening the chain until the poisoned
+motive had no later match exposed the true `found (IO (IO Response))`.
+Workaround (applied in `todo-backend/src/auth.mo`): an IO-returning
+helper IS the arm — `Result.err e => Auth.login_failed_logged (...)` —
+never `return`-wrapped, the way `finish_login` already did it. Upstream:
+`monad check` must run the same elaborate gate as
+`compile_loaded_modules_to_ir` (a decl it accepts must not fail to
+elaborate later), and the gate should blame the innermost mismatching
+subterm rather than the next match's poisoned motive. Preview from the
+same session: the 2026-11-03 nightly (`ee50a7da`) additionally rejects
+`dpop.mo`'s `#[extern "c"]]` declarations with `a native may not
+construct an empty/False type` (the check is new since this pin); when
+the pin next moves past it, the externs must adopt the witness-type
+pattern that error message describes. The same nightly's `monadup`
+self-update is what re-skewed the local toolchain mid-session on
+2026-11-03 — `scripts/check-toolchain.sh` is the guard, and it must
+run before any local build, not only in CI.
+
 The oak `HtmlT`/`Program` block is tracked under the existing
 `dict-capturing-closure-segfault` entry.
 **`moon-static-no-mime-or-binary` is resolved** (M13, upstream commits
