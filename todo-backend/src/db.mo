@@ -132,8 +132,36 @@ pub def Db.migration_2 : Migration :=
   Migrations.migration 2i64 "utc_offset_minutes_and_iso_timestamps"
     Db.migration_2_up_sql (Option.some Db.migration_2_down_sql)
 
+/// The ATproto login flow stores what the callback needs: the authorization
+/// server, the PDS, the DID being signed in, the display handle, and the
+/// per-login DPoP key halves. `issuer`/`pds`/`did` are validated before
+/// use in `Atproto.resolve_identity`/`Atproto.authorization_server`; the
+/// key halves are opaque base64url blobs to this layer.
+def Db.migration_3_up_sql : String := String.concat_list [
+  "ALTER TABLE oauth_states ADD COLUMN issuer TEXT NOT NULL DEFAULT ''; ",
+  "ALTER TABLE oauth_states ADD COLUMN pds TEXT NOT NULL DEFAULT ''; ",
+  "ALTER TABLE oauth_states ADD COLUMN did TEXT NOT NULL DEFAULT ''; ",
+  "ALTER TABLE oauth_states ADD COLUMN handle TEXT; ",
+  "ALTER TABLE oauth_states ADD COLUMN dpop_priv TEXT NOT NULL DEFAULT ''; ",
+  "ALTER TABLE oauth_states ADD COLUMN dpop_pub TEXT NOT NULL DEFAULT ''; "
+]
+
+def Db.migration_3_down_sql : String := String.concat_list [
+  "ALTER TABLE oauth_states DROP COLUMN dpop_pub; ",
+  "ALTER TABLE oauth_states DROP COLUMN dpop_priv; ",
+  "ALTER TABLE oauth_states DROP COLUMN handle; ",
+  "ALTER TABLE oauth_states DROP COLUMN did; ",
+  "ALTER TABLE oauth_states DROP COLUMN pds; ",
+  "ALTER TABLE oauth_states DROP COLUMN issuer; "
+]
+
+pub def Db.migration_3 : Migration :=
+  Migrations.migration 3i64 "oauth_states_atproto_login"
+    Db.migration_3_up_sql (Option.some Db.migration_3_down_sql)
+
 pub def Db.migrations : List Migration :=
-  List.cons Db.migration (List.cons Db.migration_2 List.empty)
+  List.cons Db.migration
+    (List.cons Db.migration_2 (List.cons Db.migration_3 List.empty))
 
 // ─── Queries ────────────────────────────────────────────────────────────
 
@@ -630,16 +658,63 @@ pub def Db.delete_session (store : Store) (token_hash : String) : IO (Result Str
     Db.exec_unit conn "DELETE FROM sessions WHERE id = ?" [Value.text token_hash]
       "session delete failed")
 
+// ─── Wall-clock time ────────────────────────────────────────────────────
+//
+// `Instant.now` is a monotonic clock, not wall time, so OAuth timestamps
+// (`iat`) and expiry strings come from SQLite's clock instead. One source
+// for all of them also keeps the database's own `expires_at > now`
+// comparisons consistent with what the app computes.
+
+/// Unix epoch seconds, as a signed integer.
+pub def Db.epoch_now (store : Store) : IO (Result String I64) :=
+  Db.with_conn store.db_path (fn (conn : SqliteConn) => do {
+    let rs <- Sqlite.query_io conn
+      "SELECT CAST(strftime('%s','now') AS INTEGER) AS now_epoch" List.empty;
+    match rs {
+      Result.err e => return (Result.err ("clock read failed: " ++ SqlError.message e)),
+      Result.ok result_set => match result_set.rows {
+        List.empty => return (Result.err "clock read failed: no row"),
+        List.cons row _ => match Row.get_i64 row "now_epoch" {
+          Result.err e => return (Result.err (SqlError.message e)),
+          Result.ok now => return (Result.ok now),
+        },
+      },
+    }
+  })
+
+/// An ISO-8601 `Z` timestamp `minutes` from now.
+pub def Db.iso_timestamp_in (store : Store) (minutes : I64)
+  : IO (Result String String) :=
+  Db.with_conn store.db_path (fn (conn : SqliteConn) => do {
+    let rs <- Sqlite.query_io conn
+      "SELECT strftime('%Y-%m-%dT%H:%M:%SZ','now', ?) AS at"
+      [Value.text (String.concat (I64.to_string minutes) " minutes")];
+    match rs {
+      Result.err e => return (Result.err ("clock read failed: " ++ SqlError.message e)),
+      Result.ok result_set => match result_set.rows {
+        List.empty => return (Result.err "clock read failed: no row"),
+        List.cons row _ => match Row.get_text row "at" {
+          Result.err e => return (Result.err (SqlError.message e)),
+          Result.ok at => return (Result.ok at),
+        },
+      },
+    }
+  })
+
 pub def Db.put_oauth_state (store : Store) (state : OauthState)
     : IO (Result String Unit) :=
   Db.with_conn store.db_path (fn (conn : SqliteConn) =>
     Db.exec_unit conn
       ("INSERT OR REPLACE INTO oauth_states " ++
-       "(state, nonce, code_verifier, redirect_to, created_at, expires_at) " ++
-       "VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?)")
+       "(state, nonce, code_verifier, redirect_to, issuer, pds, did, " ++
+       "handle, dpop_priv, dpop_pub, created_at, expires_at) " ++
+       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, " ++
+       "strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?)")
       [Value.text state.state, Value.text state.nonce,
        Value.text state.code_verifier, Db.opt_text_value state.redirect_to,
-       Value.text state.expires_at]
+       Value.text state.issuer, Value.text state.pds, Value.text state.did,
+       Db.opt_text_value state.handle, Value.text state.dpop_priv,
+       Value.text state.dpop_pub, Value.text state.expires_at]
       "oauth state insert failed")
 
 def Db.decode_oauth_state_row (row : Row) : Result SqlError OauthState :=
@@ -648,10 +723,18 @@ def Db.decode_oauth_state_row (row : Row) : Result SqlError OauthState :=
       SqlResult.and_then (Row.get_text row "code_verifier") (fn (verifier : String) =>
         SqlResult.and_then (Db.optional_text row "redirect_to") (fn (redirect : Option String) =>
           SqlResult.and_then (Row.get_text row "expires_at") (fn (expires : String) =>
-            Result.ok ({
-              state := state, nonce := nonce, code_verifier := verifier,
-              redirect_to := redirect, expires_at := expires
-            } : OauthState))))))
+            SqlResult.and_then (Row.get_text row "issuer") (fn (issuer : String) =>
+              SqlResult.and_then (Row.get_text row "pds") (fn (pds : String) =>
+                SqlResult.and_then (Row.get_text row "did") (fn (did : String) =>
+                  SqlResult.and_then (Db.optional_text row "handle") (fn (handle : Option String) =>
+                    SqlResult.and_then (Row.get_text row "dpop_priv") (fn (dpop_priv : String) =>
+                      SqlResult.and_then (Row.get_text row "dpop_pub") (fn (dpop_pub : String) =>
+                        Result.ok ({
+                          state := state, nonce := nonce, code_verifier := verifier,
+                          redirect_to := redirect, expires_at := expires,
+                          issuer := issuer, pds := pds, did := did,
+                          handle := handle, dpop_priv := dpop_priv, dpop_pub := dpop_pub
+                        } : OauthState))))))))))))
 
 pub def Db.take_oauth_state (store : Store) (state : String)
     : IO (Result String (Option OauthState)) :=
@@ -659,7 +742,8 @@ pub def Db.take_oauth_state (store : Store) (state : String)
     let rs <- Sqlite.query_io conn
       ("DELETE FROM oauth_states WHERE state = ? AND expires_at > " ++
        "strftime('%Y-%m-%dT%H:%M:%SZ','now') " ++
-       "RETURNING state, nonce, code_verifier, redirect_to, expires_at")
+       "RETURNING state, nonce, code_verifier, redirect_to, issuer, pds, " ++
+       "did, handle, dpop_priv, dpop_pub, expires_at")
       [Value.text state];
     match rs {
       Result.err e => return (Result.err ("oauth state read failed: " ++ SqlError.message e)),

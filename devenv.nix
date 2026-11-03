@@ -26,6 +26,10 @@ in
     # `[link] pkg-config = ["sqlite3"]`; pkg-config resolves the store path
     # and the CLI is useful for manual state checks.
     sqlite
+    # The oauth/crypto motes bring the same requirement for libcrypto: the
+    # backend's DPoP seam links `-lcrypto` through crypto's
+    # `[link] pkg-config = ["openssl"]` once it depends on the oauth mote.
+    openssl
     pkg-config
   ];
 

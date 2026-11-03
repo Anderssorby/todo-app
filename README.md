@@ -239,22 +239,40 @@ browser's cached failed module cannot poison the page.
 
 ## Users, time and notes
 
-**Sign-in is deferred on ATproto's DPoP requirement.** The pinned Monad now
-ships `jsonwebtoken` and an `oauth` client that validates tokens (and, on
-main but not yet in this nightly, a resource-server bearer guard), so the old
-"cannot validate an ID token" blocker is closed. This app targets AT Protocol
-OAuth as a public client with the identity-only `atproto` scope. ATproto
-requires DPoP (RFC 9449): each session must generate a P-256 key and sign an
-ES256 proof for every authorization-server and PDS request. Monad's `crypto`
-mote currently only verifies ES256; it cannot generate a key or sign. So
-`/auth/login` and `/auth/callback` return 503 with that explanation. The
-capability is planned in
-`monad-plans/library-ideas/crypto-primitives.md`. The only sign-in is the
-gated local stub: start the server with `TODO_DEV_AUTH=1` (or `--dev-auth`)
-to resolve a local `dev` user. It is off by default and never enabled in the
-image or Kubernetes manifest. `GET /api/me` returns 401 in production and
-the SPA then shows its login view (it uses a real link, because the wasm
-runtime has no location API).
+**Sign-in is AT Protocol OAuth (public client, `atproto` scope).** The
+backend implements the full ATproto OAuth flow: handle or DID -> DID
+document -> PDS -> authorization server (RFC 8414) -> pushed
+authorization request (RFC 9126, carrying the PKCE S256 challenge and
+the DPoP JKT) -> 302 to the authorization endpoint -> callback -> token
+exchange -> `com.atproto.server.getSession` on the PDS -> the app's own
+session cookie. Every authorization-server and PDS request carries an
+ES256 DPoP proof (RFC 9449) signed by a per-login P-256 key; the token
+`sub` must equal the DID resolved before the redirect and `token_type`
+must be `DPoP`. Monad's `crypto` mote still cannot generate keys or
+sign, so the keygen/sign seam lives in `todo-backend/src/dpop.mo` behind
+the same module boundary the mote's planned signing phase will have
+(see `PLAN.md`'s gap list). ATproto tokens are never persisted or sent
+to the browser; the cookie is a raw CSPRNG token stored only as its
+SHA-256 digest, HttpOnly, SameSite=Lax, Secure when the redirect origin
+is https.
+
+The AS fetches `GET /client-metadata.json` (served CORS-open). The
+default `client_id` is the ATproto loopback development shape
+(`http://localhost?redirect_uri=…&scope=atproto`, no registration); a
+real deployment passes `--auth-client-id https://<host>/client-metadata.json`.
+Configure the flow with:
+
+    --auth-redirect-uri  https://your-host/auth/callback
+    --auth-client-id      https://your-host/auth/callback
+    --auth-scope          atproto
+    --auth-resolver       https://bsky.social
+    --auth-plc            https://plc.directory
+
+The development stub is unchanged and orthogonal: start the server with
+`TODO_DEV_AUTH=1` (or `--dev-auth`) to resolve a local `dev` user; it is
+off by default and never enabled in the image or Kubernetes manifest.
+In production `GET /api/me` returns 401 and the SPA shows its login view
+(a real link; the wasm runtime has no location API).
 
 **Time is stored in UTC and displayed at a fixed offset.** Timestamps are
 ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`); migration 2 added

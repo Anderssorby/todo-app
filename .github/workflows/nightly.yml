@@ -191,9 +191,19 @@ jobs:
 
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8095/api/todos)" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8095/)" = 302
+          # The login page offers the ATproto handle form, and the client
+          # metadata document the authorization server fetches is served.
+          curl -fsS http://127.0.0.1:8095/login | grep -q 'action="/auth/login"'
+          curl -fsS http://127.0.0.1:8095/client-metadata.json \
+            | grep -q '"dpop_bound_access_tokens":true'
 
           kill "$server"
           wait "$server" || true
+
+          # The full ATproto OAuth flow against a local stub authorization
+          # server: PAR, DPoP proofs (verified server-side by the stub),
+          # token exchange, PDS session confirmation, app session cookie.
+          node web/auth-smoke.mjs "$PWD/target/debug/todo-backend" 8096
 
           # Then the dev stub, which makes every request the local dev user
           # (no IdP needed) so the transactional SQLite path runs for real.

@@ -48,5 +48,24 @@ workspace = true
 [dependencies.sqlite]
 workspace = true
 
+# ATproto sign-in: oauth's `OauthHttp`/`Pkce`/`OauthError` seams. The DPoP
+# signer itself is the app-local FFI in `src/dpop.mo`, so THIS mote owns
+# its link flags: `-lcrypto` is declared here, not inherited from the
+# `crypto` mote (no module here may `use` a `crypto::` module while
+# `dpop.mo`'s externs exist, because `crypto::ffi` declares fifteen of
+# the same C symbols and one binary cannot declare a symbol twice).
+[dependencies.oauth]
+workspace = true
+
+[dependencies.crypto]
+workspace = true
+
+# The `dpop.mo` externs resolve against the system libcrypto; the
+# pkg-config lookup finds the devshell's openssl `-L` (the tls mote's
+# convention, see `motes/crypto/mote.toml`).
+[link]
+libs = ["crypto"]
+pkg-config = ["openssl"]
+
 [affine]
 mode = "warn"

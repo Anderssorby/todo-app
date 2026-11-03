@@ -16,8 +16,14 @@ use todo_core::view {
   View.edit_not_found_page_html, View.edit_page_html, View.kanban_page_html,
   View.new_page_html, View.page_html
 }
-use lib::form {Form.due_of, Form.group_of, Form.tags_of, Form.title_of, Form.value_or_empty}
-use lib::auth {Auth.dev_csrf, Auth.dev_user, Config, Context}
+use lib::form {
+  Form.due_of, Form.group_of, Form.tags_of, Form.title_of, Form.value_of,
+  Form.value_or_empty
+}
+use lib::auth {
+  Auth.begin_login, Auth.client_metadata_json, Auth.dev_csrf, Auth.dev_user,
+  Auth.finish_login, Auth.logout, Auth.session_of_request, Config, Context
+}
 use lib::db {Db.apply_and_save, Db.load, Db.update_utc_offset}
 use lib::persist {Persist.loader_version}
 use lib::logging {App.logger}
@@ -378,44 +384,50 @@ pub def Handlers.unauthorized_json : Response :=
   { r with status := Status.unauthorized }
 
 pub def Handlers.login_page (config : Config) (req : Request) : IO Response := do {
+  let dev_note :=
+    if config.dev_auth
+    then "<p>Dev sign-in is active: every request is the local dev user.</p>"
+    else "";
   let html :=
-    "<!doctype html><html><head><meta charset=\"utf-8\"><title>todo-app</title>" ++
+    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in - todo-app</title>" ++
     "</head><body><h1>todo-app</h1>" ++
-    "<p>Sign-in is disabled in this build: AT Protocol OAuth needs DPoP " ++
-    "proofs signed with a per-session ES256 key, and Monad's crypto mote " ++
-    "can verify but not yet generate a P-256 key or sign. For local use, " ++
-    "start the server with <code>TODO_DEV_AUTH=1</code>.</p>" ++
+    "<p>Sign in with your AT Protocol account: enter your handle" ++
+    " (for example <code>alice.bsky.social</code>) or DID.</p>" ++
+    "<form method=\"post\" action=\"/auth/login\">" ++
+    "<input type=\"text\" name=\"handle\" placeholder=\"handle or DID\" autofocus> " ++
+    "<button type=\"submit\">Sign in</button></form>" ++
+    dev_note ++
     "</body></html>";
   return (Handlers.html_response html)
 }
 
-/// A 503 that says why sign-in is unavailable, rather than pretending the
-/// route does not exist. The oauth mote validates tokens now, but ATproto
-/// OAuth requires DPoP with a per-session ES256 key, and the crypto mote has
-/// no key generation or signing yet.
-def Handlers.sign_in_unavailable : IO Response := do {
-  let _ <- Logger.warn App.logger
-    ("OAuth sign-in is disabled: ATproto DPoP requires ES256 signing, which the crypto mote does not provide");
-  let r := Response.ok_text
-    ("OAuth sign-in is not enabled in this build. AT Protocol OAuth requires " ++
-     "DPoP proofs signed with a per-session ES256 key; Monad's crypto mote " ++
-     "can verify signatures but cannot yet generate a P-256 key or sign. " ++
-     "Production sign-in is therefore deferred. Use TODO_DEV_AUTH=1 for " ++
-     "local sign-in.");
-  return { r with status := Status.service_unavailable,
-    headers := Headers.set "Content-Type" "text/plain; charset=utf-8" Headers.empty }
-}
-
+/// `POST /auth/login`: the handle (or DID) starts the ATproto flow.
+/// Errors render the login page again with the reason.
 pub def Handlers.auth_login (config : Config) (req : Request) : IO Response :=
   if config.dev_auth
   then return (Response.redirect Status.found "/")
-  else Handlers.sign_in_unavailable
+  else
+    Auth.begin_login config (Option.get_or_default "" (Form.value_of "handle" req))
+      (Form.value_of "redirect_to" req)
 
+/// `GET /auth/callback`: finish the ATproto flow (token exchange, PDS
+/// confirmation, session cookie).
 pub def Handlers.auth_callback (config : Config) (req : Request) : IO Response :=
-  Handlers.sign_in_unavailable
+  if config.dev_auth
+  then return (Response.redirect Status.found "/")
+  else Auth.finish_login config req
 
 pub def Handlers.auth_logout (config : Config) (req : Request) : IO Response :=
-  return (Response.redirect Status.found "/login")
+  Auth.logout config req
+
+/// `GET /client-metadata.json`: the ATproto authorization-server client
+/// document. CORS-open: the AS fetches this cross-origin.
+pub def Handlers.client_metadata (config : Config) (req : Request) : IO Response := do {
+  let r := Handlers.json_response (Auth.client_metadata_json config);
+  return { r with
+    headers := Headers.set "Access-Control-Allow-Origin" "*"
+      (Headers.set "Cache-Control" "no-store" r.headers) }
+}
 
 /// The `{"csrf":…,"user":…}` envelope shared by `GET /api/me` and the
 /// offset update.
@@ -426,11 +438,21 @@ def Handlers.me_json (user : User) (csrf : String) : String :=
         (String.concat (Codec.user_to_json user) "}")))
 
 pub def Handlers.api_me (config : Config) (req : Request) : IO Response := do {
-  let user_opt <- Auth.dev_user config;
-  match user_opt {
-    Option.some user =>
-      return (Handlers.json_response (Handlers.me_json user Auth.dev_csrf)),
-    Option.none => return Handlers.unauthorized_json,
+  let session <- Auth.session_of_request config req;
+  match session {
+    Option.some user_csrf =>
+      match user_csrf {
+        Pair.pair user csrf =>
+          return (Handlers.json_response (Handlers.me_json user csrf)),
+      },
+    Option.none => do {
+      let user_opt <- Auth.dev_user config;
+      match user_opt {
+        Option.some user =>
+          return (Handlers.json_response (Handlers.me_json user Auth.dev_csrf)),
+        Option.none => return Handlers.unauthorized_json,
+      }
+    },
   }
 }
 
