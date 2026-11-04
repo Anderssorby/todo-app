@@ -1198,12 +1198,19 @@ Gap recorded:
   app-local loop stands in until then; re-test this before adopting a newer
   moon.
 
-## ATproto OAuth sign-in, DPoP seam, pin d6238985 (2026-11-02)
+## ATproto OAuth sign-in, DPoP seam, pin c104579e (2026-11-04)
 
-The pin moved to Monad main `d62389855e0f8c561d91197372150c778f9bff38`
+The pin first moved to Monad main `d62389855e0f8c561d91197372150c778f9bff38`
 (nightly gate: `ci: run the nightly gate strict when the floor is
 unresolvable`) — flake, devenv, `mote.toml` members and the workspace
-lock all moved together, as always.
+lock all moved together, as always. Then the nightly workflow's own
+contract caught up: `monadup default` installs the *latest* nightly, so
+the `check-build` job fails by design whenever the pin trails it ("bump
+the pin to the nightly instead of building the pin") — that failure is
+the repo's compatibility signal, not a broken build. On 2026-11-04 the
+pin chased the latest nightly to
+`c104579e7dc3caeb43101eee58302d694a3b2c1c` — flake, devenv, `mote.toml`
+members and the workspace lock moving together again.
 
 The user system now has its production login: AT Protocol OAuth as a
 public client (`atproto` scope only, PKCE S256, RFC 9126 PAR, RFC 9449
@@ -1272,25 +1279,28 @@ DPoP seam contract (`dpop.mo`, to delete when crypto grows signing):
   `libs = ["crypto"]`, `pkg-config = ["openssl"]` directly — the link
   flags fire from the app's own mote instead of a crypto import's.
 
-Verification at `d6238985` (2026-11-03, pinned toolchain — a mid-session
-`monadup` self-update to the 11-03 nightly had to be backed out via
-`scripts/check-toolchain.sh`'s rule first; see the gap entry below):
-`monad check --workspace --locked` — 25 files, 0 errors, 267 warnings;
-`monad test --workspace --locked` — 105/105 (action 19, codec 11,
-codec_web 2, kernel 3, storage 16, view 24, atproto 4, dpop 8, form 9,
-db 2, main 1, webgen 6; the atproto suite drives the whole flow against
-`OauthHttp.fake` and the dpop suite exercises the OpenSSL FFI seam);
-native builds of todo-backend, todo-spa (wasm32, hash-pinned loader via
-todo-webgen) and todo-webgen; `web/boot_url.test.mjs`,
-`web/runtime_args.test.mjs`, `web/smoke.mjs` and its `SMOKE_UNAUTH`
-variant, and `web/keepalive.test.mjs` (24 idle keep-alive sockets held,
-a fresh connection still served). Finally `web/auth-smoke.mjs`: the
-built backend booted against a local stub resolver/PDS/authorization
-server whose Node-side verifier checks every DPoP proof with its own
-ES256 — an implementation that is not OpenSSL — covering PAR with
-`dpop_jkt`, the 302 with the request_uri, the callback token exchange,
-PDS session confirmation, the HttpOnly `todo_session` cookie, `/api/me`
-and logout. All green.
+Verification at `c104579e` (2026-11-04, pinned toolchain — the run was
+shielded from `monadup`'s ambient self-updates by putting a
+`~/.monad/downloads/nightly-…-c104579e` binary first on PATH;
+`scripts/check-toolchain.sh` passed first; see the gap entry below):
+`monad check --workspace --locked` — 25 files, 0 errors, 280 warnings;
+`monad test` in both the CI form (`--locked todo-core/src
+todo-backend/src todo-webgen/src`) and `--workspace --locked` —
+105/105 each (action 19, codec 11, codec_web 2, kernel 3, storage 16,
+view 24, atproto 4, dpop 8, form 9, db 2, main 1, webgen 6; the
+atproto suite drives the whole flow against `OauthHttp.fake` and the
+dpop suite exercises the OpenSSL FFI seam); `monad check start.mo`
+clean; native builds of todo-backend, todo-spa (wasm32, hash-pinned
+loader via todo-webgen, then run) and todo-webgen;
+`web/boot_url.test.mjs`, `web/runtime_args.test.mjs`, `web/smoke.mjs`
+and its `SMOKE_UNAUTH` variant, and `web/keepalive.test.mjs` (24 idle
+keep-alive sockets held, a fresh connection still served). Finally
+`web/auth-smoke.mjs`: the built backend booted against a local stub
+resolver/PDS/authorization server whose Node-side verifier checks
+every DPoP proof with its own ES256 — an implementation that is not
+OpenSSL — covering PAR with `dpop_jkt`, the 302 with the request_uri,
+the callback token exchange, PDS session confirmation, the HttpOnly
+`todo_session` cookie, `/api/me` and logout. All green.
 
 ## Gap-Logging Workflow (continuous, not deferred)
 
@@ -1360,15 +1370,19 @@ never `return`-wrapped, the way `finish_login` already did it. Upstream:
 `monad check` must run the same elaborate gate as
 `compile_loaded_modules_to_ir` (a decl it accepts must not fail to
 elaborate later), and the gate should blame the innermost mismatching
-subterm rather than the next match's poisoned motive. Preview from the
-same session: the 2026-11-03 nightly (`ee50a7da`) additionally rejects
-`dpop.mo`'s `#[extern "c"]]` declarations with `a native may not
-construct an empty/False type` (the check is new since this pin); when
-the pin next moves past it, the externs must adopt the witness-type
-pattern that error message describes. The same nightly's `monadup`
-self-update is what re-skewed the local toolchain mid-session on
-2026-11-03 — `scripts/check-toolchain.sh` is the guard, and it must
-run before any local build, not only in CI.
+subterm rather than the next match's poisoned motive. Update,
+2026-11-04: the 2026-11-03 nightly (`ee50a7da`)
+additionally rejected `dpop.mo`'s `#[extern "c"]]` declarations with `a
+native may not construct an empty/False type` — but only because the
+new checker was running against the OLD pin's init, whose
+`pub type Ptr {}` really was uninhabited. At `c104579e` the init's
+prelude declares `#[opaque]` witness constructors (`Ptr { ptr_witness }`,
+`I32 { i32_witness }`, …), so the externs' result types are inhabited
+and `dpop.mo` passed unchanged: the pin chase itself was the fix, and
+those 21 errors were toolchain skew, not a dpop.mo defect. The same
+nightly's `monadup` self-update is what re-skewed the local toolchain
+mid-session on 2026-11-03 — `scripts/check-toolchain.sh` is the guard,
+and it must run before any local build, not only in CI.
 
 The oak `HtmlT`/`Program` block is tracked under the existing
 `dict-capturing-closure-segfault` entry.
