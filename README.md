@@ -151,7 +151,8 @@ monad build --locked todo-webgen
 
 node web/boot_url.test.mjs
 node web/runtime_args.test.mjs
-node web/smoke.mjs "$PWD/web/app.wasm"
+# Node < 22 needs a deeper stack for the 701-item large-response check.
+node --stack-size=4000 web/smoke.mjs "$PWD/web/app.wasm"
 ```
 
 `--target` takes a separate argument (`--target=x` does not parse).
@@ -200,7 +201,7 @@ PLAN.md, `moon-serve-concurrent-parks-accept-loop`.
 The SPA half is exercised automatically over a stub DOM:
 
 ```bash
-node web/smoke.mjs "$PWD/web/app.wasm"
+node --stack-size=4000 web/smoke.mjs "$PWD/web/app.wasm"
 ```
 
 It covers mount, initial load, toggle, tabs/settings/theme, subtasks,
