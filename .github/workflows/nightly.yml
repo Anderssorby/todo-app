@@ -158,9 +158,13 @@ jobs:
         run: |
           node web/boot_url.test.mjs
           node web/runtime_args.test.mjs
-          node web/smoke.mjs "$PWD/web/app.wasm"
+          # --stack-size: the 701-item large-response check renders a patch
+          # deep enough to overflow this runner's apt Node 18 (V8 10) where
+          # the dev shell's Node 24 has headroom; deep wasm frames count
+          # against the same JS stack.
+          node --stack-size=4000 web/smoke.mjs "$PWD/web/app.wasm"
           # A 401 from /api/me must show the sign-in view, not a broken page.
-          SMOKE_UNAUTH=1 node web/smoke.mjs "$PWD/web/app.wasm"
+          SMOKE_UNAUTH=1 node --stack-size=4000 web/smoke.mjs "$PWD/web/app.wasm"
 
       # A binary that links but cannot open a SQLite database must fail the
       # build here, not in production. `monadup default` follows the latest

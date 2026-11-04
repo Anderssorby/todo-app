@@ -1300,7 +1300,12 @@ resolver/PDS/authorization server whose Node-side verifier checks
 every DPoP proof with its own ES256 — an implementation that is not
 OpenSSL — covering PAR with `dpop_jkt`, the 302 with the request_uri,
 the callback token exchange, PDS session confirmation, the HttpOnly
-`todo_session` cookie, `/api/me` and logout. All green.
+`todo_session` cookie, `/api/me` and logout. All green. Because the
+nightly runner's Node is the Ubuntu 24.04 `apt` 18.x (not the dev
+shell's 24), the same web/node commands plus `auth-smoke.mjs` and
+`keepalive.test.mjs` were additionally run under Node 18.20.8 — all
+green with `web/package.json` and the `--stack-size=4000` smoke flag
+(see the two gap entries above).
 
 ## Gap-Logging Workflow (continuous, not deferred)
 
@@ -1383,6 +1388,34 @@ those 21 errors were toolchain skew, not a dpop.mo defect. The same
 nightly's `monadup` self-update is what re-skewed the local toolchain
 mid-session on 2026-11-03 — `scripts/check-toolchain.sh` is the guard,
 and it must run before any local build, not only in CI.
+
+**Found 2026-11-04, fixed in-repo** —
+`web-loader-js-need-esm-declaration-for-node-18`: the generated loader
+graph (`boot.js`, `web.gen.js`, `web_runtime.gen.js`) and the vendored
+sources it copies are ES modules in `.js` files. Node >= 22
+module-detection loads them fine (the dev shell's Node 24 hid this),
+but the nightly runner's `apt` Node 18 treats a bare `.js` as
+CommonJS, so `runtime_args.test.mjs`'s dynamic import died with
+`SyntaxError: Cannot use import statement outside a module` — the
+first run of the new "Loader and SPA tests" step failed there while
+every local (Node 24) run was green. Fix: `web/package.json` with
+`{"type": "module"}` — the nearest-package.json declaration is what the
+files are, it is invisible to the browser, and `todo-webgen` writes
+only its own four files so it does not clobber it. All four loader-step
+commands verified under Node 18.20.8 and Node 24 after the fix.
+
+**Found 2026-11-04, fixed in-repo** —
+`large-list-patch-render-exhausts-node-18-stack`: the same Node 18 run
+then overflowed its default V8 stack 18 checks into the smoke:
+`RangeError: Maximum call stack size exceeded` inside
+`Patch.apply_attrs` -> `dom_set_attr` while rendering the 701-item
+large-response list — deep-but-finite wasm frames counting against the
+JS stack; Node 24's V8 has the headroom, Node 18's does not. Fix:
+`--stack-size=4000` on the `smoke.mjs` invocations (nightly.yml and
+README). Upstream note: the recursion is depth-proportional to the
+rendered list, so a large enough list exhausts browser wasm stacks too
+(Firefox's especially) — an iterative patch walk in `oak_wasm` would
+remove the depth bound.
 
 The oak `HtmlT`/`Program` block is tracked under the existing
 `dict-capturing-closure-segfault` entry.
