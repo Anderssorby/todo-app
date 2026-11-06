@@ -36,100 +36,100 @@ path = "start.mo"
 
 [workspace.dependencies.init]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "init"
 
 [workspace.dependencies.std]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "std"
 
 [workspace.dependencies.json]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/json"
 
 [workspace.dependencies.oak]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/oak"
 
 [workspace.dependencies.xml_html]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/xml_html"
 
 # Shared timestamp/due-date formatting (`todo-core/src/stamp.mo`).
 [workspace.dependencies.time]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/time"
 
 [workspace.dependencies.parsec]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/parsec"
 
 # Markdown notes, shared by the SSR view and the wasm shell.
 [workspace.dependencies.markdown]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/markdown"
 
 [workspace.dependencies.moon]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/moon"
 
 [workspace.dependencies.http]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/http"
 
 [workspace.dependencies.log]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/log"
 
 [workspace.dependencies.clap]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/clap"
 
 [workspace.dependencies.sql]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/sql"
 
 [workspace.dependencies.sqlite]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/sqlite"
 
 [workspace.dependencies.jsgen]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/jsgen"
 
 [workspace.dependencies.oak_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/oak_wasm"
 
 [workspace.dependencies.web_wasm]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/web_wasm"
 
 [workspace.dependencies.web_event]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/web_event"
 
 # The typed-event ABI's C half, linked into the wasm build.
 [workspace.dependencies.runtime]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "runtime"
 
 # The ATproto sign-in consumes the oauth mote's transport seam, PKCE and
@@ -140,7 +140,7 @@ subdir = "runtime"
 # crypto entry below).
 [workspace.dependencies.oauth]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/oauth"
 
 # The pinned declaration of the libcrypto the backend's own DPoP FFI
@@ -150,7 +150,7 @@ subdir = "motes/oauth"
 # twice. `todo-backend/mote.toml` carries the `[link]` flags itself.
 [workspace.dependencies.crypto]
 git = "https://github.com/monad-lang/monad.git"
-rev = "c104579e7dc3caeb43101eee58302d694a3b2c1c"
+rev = "e96b18ae14be57b1c361b441662809f3f76205a0"
 subdir = "motes/crypto"
 
 # The intra-repo shared core (path relative to this workspace root).

@@ -1,13 +1,16 @@
-# Check and build the app with the LATEST Monad nightly.
+# Check and build the app with the PINNED Monad nightly.
 #
 # The image workflow (image.yml) uses the flake's pinned toolchain. This one
-# deliberately uses `monadup default`, so it is the compatibility signal for
-# the next compiler revision: a parser/prelude/nightly regression shows up
-# here before the pin is bumped. It also builds with a compiler that may be
-# NEWER than the pinned motes, which is the exact skew behind
-# `compiler-mote-revision-skew-is-not-diagnosed` (see PLAN.md) -- hence the
-# boot-the-server step at the end, which fails on a binary that links but
-# cannot open SQLite.
+# installs the nightly named by MONAD_NIGHTLY below -- the same revision the
+# motes and the flake are pinned to -- so the compiler can no longer run
+# ahead of the motes (the exact skew behind
+# `compiler-mote-revision-skew-is-not-diagnosed`, see PLAN.md). The nightly
+# moves only by explicit bumps: MONAD_NIGHTLY, every mote.toml rev, the
+# flake.nix input and the two lock files move together. This ends the
+# `monadup default` chase, where the check-build job failed by design
+# whenever the pin trailed the latest nightly -- that failure was the old
+# compatibility signal, not a broken build. The boot-the-server step at the
+# end still fails on a binary that links but cannot open SQLite.
 name: nightly
 
 on:
@@ -21,6 +24,13 @@ on:
 
 permissions:
   contents: read
+
+# The exact monadup tag this workflow installs: the pin for the CI compiler.
+# Bumped explicitly, together with every `rev = "..."` in mote.toml, the
+# flake.nix input (monad.url + monadRev) and both lock files -- never by
+# following the latest nightly.
+env:
+  MONAD_NIGHTLY: nightly-2026-11-06-e96b18ae
 
 concurrency:
   group: nightly-${{ github.ref }}
@@ -82,39 +92,42 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Install the latest Monad nightly
+      - name: Install the pinned Monad nightly
         run: |
           curl -fsSL https://monad-lang.org/install | bash
           export PATH="$HOME/.monad/bin:$PATH"
-          monadup default
+          monadup install "$MONAD_NIGHTLY"
+          monadup use "$MONAD_NIGHTLY"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
           monad version
           monadup doctor
 
       # The compiler's runtime must match the pinned std/runtime: a mismatch
       # links and then misbehaves at runtime (see the boot step at the bottom).
-      # Failing here means the latest nightly has moved past the pin -- bump
-      # every mote and the flake together, not just this job. A pin between
-      # nightlies (main ahead of the last release) is not a mismatch: build the
-      # pinned compiler from the flake's own Monad input and use that instead.
+      # Failing here means MONAD_NIGHTLY and the mote/flake pin drifted apart
+      # -- bump every mote, the flake and MONAD_NIGHTLY together, never one
+      # alone. A pin between nightlies (main ahead of the last release) is
+      # not a mismatch: build the pinned compiler from the flake's own Monad
+      # input and use that instead.
       - name: Select the pinned compiler
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if scripts/check-toolchain.sh; then
-            echo "the latest nightly is the pin"
+            echo "$MONAD_NIGHTLY matches the mote pin"
             exit 0
           fi
 
           pin="$(grep -h '^rev = "' mote.toml | sed 's/^rev = "\(.*\)"$/\1/' | sort -u | tr -d '\n')"
           nightly="$(monad version | head -1 | awk '{print $1}')"
           # `compare` orders the pin against the installed nightly: "ahead"
-          # means the nightly contains the pin and is NEWER, so the pin is the
-          # thing to bump; "behind" means the nightly has not caught up yet.
+          # means the nightly contains the pin and is NEWER, so the pin is
+          # the thing to bump; "behind" means the nightly has not caught up
+          # yet.
           status="$(gh api "repos/monad-lang/monad/compare/${pin}...${nightly}" --jq .status)"
           if [ "$status" != "behind" ]; then
-            echo "the latest nightly ($nightly) is $status the pin ($pin)" >&2
-            echo "bump the pin to the nightly instead of building the pin" >&2
+            echo "the pinned nightly ($nightly) is $status the pin ($pin)" >&2
+            echo "bump the mote/flake pin to the nightly and MONAD_NIGHTLY with it, instead of building the pin" >&2
             exit 1
           fi
 
@@ -167,9 +180,10 @@ jobs:
           SMOKE_UNAUTH=1 node --stack-size=4000 web/smoke.mjs "$PWD/web/app.wasm"
 
       # A binary that links but cannot open a SQLite database must fail the
-      # build here, not in production. `monadup default` follows the latest
-      # nightly while the motes are pinned; on 2026-10-29 that skew produced
-      # a backend that segfaulted inside `sqlite3_open_v2` while every
+      # build here, not in production. On 2026-10-29, under the
+      # `monadup default` chase, a compiler newer than the pinned motes
+      # produced a backend that segfaulted inside `sqlite3_open_v2` while
+      # every
       # check, test and build above passed (see PLAN.md,
       # `compiler-mote-revision-skew-is-not-diagnosed`).
       - name: Boot the server and exercise SQLite
