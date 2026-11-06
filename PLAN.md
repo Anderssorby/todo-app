@@ -1057,14 +1057,17 @@ flake and every mote move together; the workspace lock was refetched and all
   `monad s start`) builds and runs it; program arguments follow `--`:
   `monad script start -- --port 3000`. `monad run start.mo` still works but is
   no longer the documented entry point.
-- The nightly workflow no longer assumes the pin is a published nightly. It
-  installs the latest nightly, and when `scripts/check-toolchain.sh` fails it
-  asks GitHub's compare API whether the nightly is behind the pin. Behind: it
-  builds the pinned compiler from the flake's own Monad input (the Cachix
-  cache may already hold it; otherwise it bootstraps once), exports
-  `MONAD_ROOT`, and prepends its `bin`.
-  Ahead: it fails and asks for a pin bump, so the "newer nightly => bump"
-  signal is kept.
+- The nightly workflow no longer assumes the pin is a published nightly,
+  and since 2026-11-06 it no longer chases the latest one either: it
+  installs the nightly its `MONAD_NIGHTLY` env names (bumped explicitly,
+  always together with the mote/flake pin; currently
+  `nightly-2026-11-06-e96b18ae`), and when
+  `scripts/check-toolchain.sh` fails it asks GitHub's compare API whether
+  that nightly is behind the pin. Behind: it builds the pinned compiler
+  from the flake's own Monad input (the Cachix cache may already hold it;
+  otherwise it bootstraps once), exports `MONAD_ROOT`, and prepends its
+  `bin`. Ahead: the mote/flake pin and `MONAD_NIGHTLY` drifted apart in a
+  bump — the job fails and asks for them to move together again.
 - moon's new work is present in the pinned sources: the hardened transformer
   server (`Server.run_t`/`run_with`, with continuous acceptance, per-request
   head/body/idle/write deadlines, header/body limits, strict request parsing
@@ -1198,19 +1201,26 @@ Gap recorded:
   app-local loop stands in until then; re-test this before adopting a newer
   moon.
 
-## ATproto OAuth sign-in, DPoP seam, pin c104579e (2026-11-04)
+## ATproto OAuth sign-in, DPoP seam, pin e96b18ae (2026-11-06)
 
 The pin first moved to Monad main `d62389855e0f8c561d91197372150c778f9bff38`
 (nightly gate: `ci: run the nightly gate strict when the floor is
 unresolvable`) — flake, devenv, `mote.toml` members and the workspace
 lock all moved together, as always. Then the nightly workflow's own
-contract caught up: `monadup default` installs the *latest* nightly, so
-the `check-build` job fails by design whenever the pin trails it ("bump
-the pin to the nightly instead of building the pin") — that failure is
+contract caught up: `monadup default` installed the *latest* nightly, so
+the `check-build` job failed by design whenever the pin trailed it ("bump
+the pin to the nightly instead of building the pin") — that failure was
 the repo's compatibility signal, not a broken build. On 2026-11-04 the
 pin chased the latest nightly to
-`c104579e7dc3caeb43101eee58302d694a3b2c1c` — flake, devenv, `mote.toml`
-members and the workspace lock moving together again.
+`c104579e7dc3caeb43101eee58302d694a3b2c1c`. On 2026-11-06 the chase
+itself was retired: the latest nightly had moved on to `e96b18a`, so
+every push sat on a by-design red job until the pin chased. The nightly
+workflow now installs the nightly its `MONAD_NIGHTLY` env names
+(`nightly-2026-11-06-e96b18ae`), bumped explicitly and never by
+following the latest nightly, so the CI compiler cannot drift from the
+motes anymore. The pin moved to
+`e96b18ae14be57b1c361b441662809f3f76205a0` — flake, `mote.toml` members
+and the workspace lock moving together again, `MONAD_NIGHTLY` with them.
 
 The user system now has its production login: AT Protocol OAuth as a
 public client (`atproto` scope only, PKCE S256, RFC 9126 PAR, RFC 9449
@@ -1279,33 +1289,33 @@ DPoP seam contract (`dpop.mo`, to delete when crypto grows signing):
   `libs = ["crypto"]`, `pkg-config = ["openssl"]` directly — the link
   flags fire from the app's own mote instead of a crypto import's.
 
-Verification at `c104579e` (2026-11-04, pinned toolchain — the run was
-shielded from `monadup`'s ambient self-updates by putting a
-`~/.monad/downloads/nightly-…-c104579e` binary first on PATH;
-`scripts/check-toolchain.sh` passed first; see the gap entry below):
-`monad check --workspace --locked` — 25 files, 0 errors, 280 warnings;
-`monad test` in both the CI form (`--locked todo-core/src
-todo-backend/src todo-webgen/src`) and `--workspace --locked` —
-105/105 each (action 19, codec 11, codec_web 2, kernel 3, storage 16,
-view 24, atproto 4, dpop 8, form 9, db 2, main 1, webgen 6; the
-atproto suite drives the whole flow against `OauthHttp.fake` and the
-dpop suite exercises the OpenSSL FFI seam); `monad check start.mo`
-clean; native builds of todo-backend, todo-spa (wasm32, hash-pinned
-loader via todo-webgen, then run) and todo-webgen;
-`web/boot_url.test.mjs`, `web/runtime_args.test.mjs`, `web/smoke.mjs`
-and its `SMOKE_UNAUTH` variant, and `web/keepalive.test.mjs` (24 idle
-keep-alive sockets held, a fresh connection still served). Finally
-`web/auth-smoke.mjs`: the built backend booted against a local stub
-resolver/PDS/authorization server whose Node-side verifier checks
-every DPoP proof with its own ES256 — an implementation that is not
-OpenSSL — covering PAR with `dpop_jkt`, the 302 with the request_uri,
-the callback token exchange, PDS session confirmation, the HttpOnly
-`todo_session` cookie, `/api/me` and logout. All green. Because the
-nightly runner's Node is the Ubuntu 24.04 `apt` 18.x (not the dev
-shell's 24), the same web/node commands plus `auth-smoke.mjs` and
-`keepalive.test.mjs` were additionally run under Node 18.20.8 — all
-green with `web/package.json` and the `--stack-size=4000` smoke flag
-(see the two gap entries above).
+Verification at `e96b18ae` (2026-11-06, pinned toolchain — the active
+`monadup` nightly IS the pin, so `scripts/check-toolchain.sh` passes on
+the ambient `monad` and no PATH fronting was needed; see the gap entry
+below): `monad check --workspace --locked` — 25 files, 0 errors, 279
+warnings; `monad test --locked todo-core/src todo-backend/src
+todo-webgen/src` (the CI form) — 105/105 (action 19, codec 11,
+codec_web 2, kernel 3, storage 16, view 24, atproto 4, dpop 8, form 9,
+db 2, main 1, webgen 6; the atproto suite drives the whole flow against
+`OauthHttp.fake` and the dpop suite exercises the OpenSSL FFI seam);
+`monad check start.mo` clean; native builds of todo-backend, todo-spa
+(wasm32, hash-pinned loader via todo-webgen, then run: the new
+toolchain's `app.wasm` is already pinned in `web/boot.js` /
+`web/boot.version`) and todo-webgen; `web/boot_url.test.mjs`,
+`web/runtime_args.test.mjs`, `web/smoke.mjs` and its `SMOKE_UNAUTH`
+variant, and `web/keepalive.test.mjs` (24 idle keep-alive sockets
+held, a fresh connection still served). Finally `web/auth-smoke.mjs`:
+the built backend booted against a local stub resolver/PDS/
+authorization server whose Node-side verifier checks every DPoP proof
+with its own ES256 — an implementation that is not OpenSSL — covering
+PAR with `dpop_jkt`, the 302 with the request_uri, the callback token
+exchange, PDS session confirmation, the HttpOnly `todo_session`
+cookie, `/api/me` and logout. All green. The Node-18 runner
+portability (`web/package.json` and the `--stack-size=4000` smoke
+flags) carries over unchanged from the `c104579e` pass, and the
+boot-the-server battery above re-ran the production 401/302, the
+dev-stub `/api/me` offset 400-on-invalid round trip, an add with a due
+date, and the keepalive regression on this pin.
 
 ## Gap-Logging Workflow (continuous, not deferred)
 
