@@ -125,6 +125,10 @@
           # `pkgs.sqlite` defaults to the `bin` output in this nixpkgs; the
           # shared library lives in the `out` output.
           cp -a ${pkgs.sqlite.out}/lib/libsqlite3.so* $out/app/lib/
+          # OpenSSL: libcrypto for the DPoP ES256 seam (dpop.mo) and libssl
+          # for the tls mote's outbound HTTPS to the PDS/authorization server.
+          cp -a ${pkgs.openssl.out}/lib/libcrypto.so.3 \
+                ${pkgs.openssl.out}/lib/libssl.so.3 $out/app/lib/
           patchelf \
             --set-interpreter ${pkgs.stdenv.cc.libc}/lib/ld-linux-x86-64.so.2 \
             --set-rpath '$ORIGIN/../lib:${pkgs.stdenv.cc.libc}/lib' \
@@ -154,8 +158,9 @@
         contents = [
           (pkgs.buildEnv {
             name = "todo-app-image-root";
-            paths = [ app pkgs.bash pkgs.coreutils ];
-            pathsToLink = [ "/app" "/bin" ];
+            # cacert: trust roots for outbound HTTPS (ATproto OAuth).
+            paths = [ app pkgs.bash pkgs.coreutils pkgs.cacert ];
+            pathsToLink = [ "/app" "/bin" "/etc/ssl" ];
           })
         ];
 
@@ -173,7 +178,12 @@
           User = "10001:10001";
           WorkingDir = "/app";
           Entrypoint = [ "/app/entrypoint.sh" ];
-          Env = [ "PATH=/bin" "HOME=/tmp" ];
+          Env = [
+            "PATH=/bin"
+            "HOME=/tmp"
+            # Read by OpenSSL's SSL_CTX_set_default_verify_paths (tls mote).
+            "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+          ];
           ExposedPorts = { "8095/tcp" = { }; };
         };
       };
