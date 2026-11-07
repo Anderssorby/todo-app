@@ -651,15 +651,18 @@ pub def Dpop.proof
       let header : String := String.concat_list [
         "{\"typ\":\"dpop+jwt\",\"alg\":\"ES256\",\"jwk\":", j, "}"
       ];
+      // Absent claims are omitted, never `null`: RFC 9449 types `nonce` and
+      // `ath` as strings, and the Bluesky AS rejects a null `nonce` with
+      // `invalid_dpop_proof` ("Invalid DPoP \"nonce\" type").
       let nonce_json : String :=
         match nonce {
-          Option.none => "null",
-          Option.some n => esc n,
+          Option.none => "",
+          Option.some n => String.concat_list [",\"nonce\":", esc n],
         };
       let ath_json : String :=
         match ath {
-          Option.none => "null",
-          Option.some a => esc a,
+          Option.none => "",
+          Option.some a => String.concat_list [",\"ath\":", esc a],
         };
       let payload : String := String.concat_list [
         "{\"iss\":", esc iss,
@@ -667,8 +670,8 @@ pub def Dpop.proof
         ",\"jti\":", esc jti,
         ",\"htm\":", esc htm,
         ",\"htu\":", esc htu,
-        ",\"nonce\":", nonce_json,
-        ",\"ath\":", ath_json,
+        nonce_json,
+        ath_json,
         "}"
       ];
       let signing_input : String :=

@@ -70,6 +70,14 @@ function verifyDpop(header, label) {
       console.error(`dpop-fail(${label}): bad JOSE header ${JSON.stringify(head)}`);
       return null;
     }
+    // Like the Bluesky AS: optional claims must be absent or strings
+    // (a `"nonce":null` is rejected as "Invalid DPoP \"nonce\" type").
+    for (const claim of ["nonce", "ath"]) {
+      if (claim in payload && typeof payload[claim] !== "string") {
+        console.error(`dpop-fail(${label}): ${claim} is ${JSON.stringify(payload[claim])}, want string or absent`);
+        return null;
+      }
+    }
     if (head.jwk.kty !== "EC" || head.jwk.crv !== "P-256") {
       console.error(`dpop-fail(${label}): bad jwk ${JSON.stringify(head.jwk)}`);
       return null;
