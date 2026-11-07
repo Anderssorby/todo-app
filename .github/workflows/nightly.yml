@@ -30,7 +30,7 @@ permissions:
 # flake.nix input (monad.url + monadRev) and both lock files -- never by
 # following the latest nightly.
 env:
-  MONAD_NIGHTLY: nightly-2026-11-06-e96b18ae
+  MONAD_NIGHTLY: nightly-2026-11-07-79aaa8e3
 
 concurrency:
   group: nightly-${{ github.ref }}
